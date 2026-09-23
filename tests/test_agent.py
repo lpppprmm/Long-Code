@@ -9,6 +9,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from threading import Event, Thread
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -31,6 +32,7 @@ from session import (
     rollover_session,
     save_state,
     search_history,
+    verify_checkpoint,
 )
 from tools import (
     TOOLS,
@@ -137,6 +139,16 @@ class ProjectTest(unittest.TestCase):
             self.registry.open("../../outside")
         with self.assertRaises(ValueError):
             self.registry.create("Missing", str(self.base / "missing"))
+
+    def test_failed_registry_write_cleans_new_project_and_allows_retry(self):
+        root = self.base / "new-repo"
+        root.mkdir()
+        with (patch("session.write_json", side_effect=OSError("registry write failed")),
+              self.assertRaises(OSError)):
+            self.registry.create("Retry Project", str(root))
+        self.assertFalse((self.registry.home / "projects" / "retry-project").exists())
+        self.assertNotIn("retry-project", self.registry.entries())
+        self.assertEqual(self.registry.create("Retry Project", str(root)).id, "retry-project")
 
     def test_unicode_project_name_gets_a_safe_id(self):
         root = self.base / "unicode-repo"
@@ -294,7 +306,39 @@ class ProjectTest(unittest.TestCase):
         todo_write(self.project, self.session, [{"content": "Verify parser", "status": "pending"}])
         rollover_session(self.project, self.session, summary)
         self.assertIn("Verify parser", self.project.handoff_file.read_text())
-        self.assertEqual(self.session.todos, [])
+        self.assertEqual(self.session.todos, [{"content": "Verify parser", "status": "pending"}])
+        self.assertEqual(load_session(self.project).todos, self.session.todos)
+        checkpoint = read_json(self.project.checkpoint_file(1))
+        self.assertEqual(checkpoint["unfinished_todos"], self.session.todos)
+
+    def test_checkpoint_detects_file_changes_after_rollover(self):
+        subprocess.run(["git", "init", str(self.repo)], check=True, capture_output=True)
+        write_file(self.project, "parser.py", "value = 1\n")
+        self.session.changed_files = ["parser.py"]
+        rollover_session(self.project, self.session, summary)
+        checkpoint = read_json(self.project.checkpoint_file(1))
+        self.assertTrue(checkpoint["repository"]["available"])
+        self.assertIn("match", verify_checkpoint(self.project, checkpoint))
+        write_file(self.project, "parser.py", "value = 2\n")
+        self.assertIn("file_hashes", verify_checkpoint(self.project, checkpoint))
+        bootstrap_session(self.project, self.session)
+        self.assertIn("Repository changed since the handoff", self.session.messages[0]["content"])
+        self.assertIn('"status": "changed"', self.project.transcript_file(2).read_text())
+
+    def test_model_usage_is_recorded_and_guides_context_threshold(self):
+        agent = Agent(model="fake", context_limit=8000, max_tokens=100)
+        usage = SimpleNamespace(usage=SimpleNamespace(input_tokens=1700, output_tokens=20))
+        agent.record_usage(self.project, self.session, usage, "agent", estimate_context(self.session.messages))
+        self.assertEqual((self.session.last_input_tokens, self.session.total_output_tokens), (1700, 20))
+        self.assertFalse(agent.context_needs_prepare(self.session))
+        add_message(self.project, self.session, "user", "x" * 1000)
+        self.assertTrue(agent.context_needs_prepare(self.session))
+        self.assertLess(estimate_context(self.session.messages), agent.context_limit)
+        self.assertEqual(load_session(self.project).last_input_tokens, 1700)
+        self.assertIn('"event": "model_usage"', self.project.transcript_file(1).read_text())
+        agent.client = FakeClient([response("Measured compaction summary")])
+        self.assertEqual(agent.prepare(self.project, self.session), "compact")
+        self.assertEqual(self.session.compact_count, 1)
 
     def test_atomic_write_failure_keeps_previous_json(self):
         before = self.project.state_file.read_text()
@@ -346,6 +390,44 @@ class ProjectTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             read_file(self.project, "agent://../project-b/state.json")
         self.assertEqual((other.root / "secret.txt").read_text(), "private")
+
+    def test_project_file_writes_are_atomic_and_preserve_mode(self):
+        path = self.repo / "script.sh"
+        path.write_text("old")
+        path.chmod(0o755)
+        with (patch("session.os.replace", side_effect=OSError("disk full")),
+              self.assertRaises(OSError)):
+            write_file(self.project, "script.sh", "new")
+        self.assertEqual(path.read_text(), "old")
+        self.assertEqual(path.stat().st_mode & 0o777, 0o755)
+        edit_file(self.project, "script.sh", "old", "new")
+        self.assertEqual(path.read_text(), "new")
+        self.assertEqual(path.stat().st_mode & 0o777, 0o755)
+
+    def test_read_and_history_scans_have_limits(self):
+        path = self.repo / "large.txt"
+        path.write_text("a" * 100_001)
+        with self.assertRaisesRegex(ValueError, "size limit"):
+            read_file(self.project, "large.txt")
+        with self.assertRaises(ValueError):
+            read_file(self.project, "large.txt", limit=1001)
+        history = self.project.transcripts_dir / "session_999.jsonl"
+        history.write_text("needle\n" * 100)
+        with patch("session.MAX_HISTORY_SCAN_BYTES", 20):
+            result = search_history(self.project, "needle")
+        self.assertIn("Search stopped at the history scan limit", result)
+
+    def test_bash_can_be_cancelled(self):
+        from tools import RunCancelled
+
+        cancel = Event()
+        thread = Thread(target=lambda: (cancel.wait(0.15), cancel.set()))
+        thread.start()
+        try:
+            with self.assertRaises(RunCancelled):
+                run_bash(self.project, "sleep 5", cancel_event=cancel)
+        finally:
+            thread.join()
 
     def test_agent_document_writes_and_protected_runtime_data(self):
         write_file(self.project, "agent://PROJECT.md", "Keep changes concise")
@@ -590,6 +672,26 @@ class ProjectTest(unittest.TestCase):
         self.assertEqual(len(results), 2)
         self.assertTrue(all(r["is_error"] for r in results))
         self.assertEqual(self.session.active_request, "Do work")
+
+    def test_cancelled_bash_keeps_valid_tool_history_and_request(self):
+        from tools import RunCancelled
+
+        client = FakeClient([response(calls=[("bash", {"command": "sleep 5"}),
+                                              ("glob", {"pattern": "*"})])])
+        cancel = Event()
+        agent = Agent(client, "fake", emit=lambda _: None)
+        agent.cancel_event = cancel
+        thread = Thread(target=lambda: (cancel.wait(0.15), cancel.set()))
+        thread.start()
+        try:
+            with self.assertRaises(RunCancelled):
+                agent.run(self.project, self.session, "Do work")
+        finally:
+            thread.join()
+        results = self.session.messages[-1]["content"]
+        self.assertEqual(len(results), 2)
+        self.assertTrue(all(result["is_error"] for result in results))
+        self.assertEqual(load_session(self.project).active_request, "Do work")
 
     def test_cli_without_credentials_and_quoted_paths(self):
         spaced = self.base / "repo with spaces"

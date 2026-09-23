@@ -3,6 +3,7 @@ const messages = new Map([
   ["running", "进行中"],
   ["completed", "已完成"],
   ["failed", "失败"],
+  ["interrupted", "已中断"],
   ["retrying", "正在重试"],
   ["Compacting", "正在压缩上下文"],
   ["Preparing handoff", "正在准备交接"],
@@ -13,6 +14,7 @@ const messages = new Map([
   ["Tool call exceeded MAX_TOKENS; increase it and /continue", "工具调用超过单次输出上限 MAX_TOKENS。请分段写入文件，或调整输出上限并重启后继续。"],
   ["Tool call exceeded MAX_TOKENS after 3 attempts; request retained. Continue with smaller file edits, or increase MAX_TOKENS within the model's output limit and restart.", "工具调用连续 3 次超过单次输出上限 MAX_TOKENS，请求已保留。请分段编辑文件，或在模型支持的范围内提高 MAX_TOKENS，重启后继续。"],
   ["No matching history.", "没有匹配的历史记录。"],
+  ["Run cancelled; unfinished request retained", "任务已停止；未完成的请求已保留"],
   ["The agent is busy. Wait for this run to finish.", "助手正忙，请等待本次运行结束。"],
   ["The selected project changed. Refresh before sending.", "所选项目已变更，请刷新后再发送。"],
   ["There is no unfinished request to continue.", "没有可继续处理的未完成请求。"],
@@ -40,6 +42,8 @@ const patterns = [
   [/^Unknown project: (.+)$/s, (_, id) => `未知项目：${id}`],
   [/^Missing project state: (.+)$/s, (_, path) => `缺少项目状态文件：${path}`],
   [/^Local storage error: (.+)$/s, (_, detail) => `本地存储错误：${detail}`],
+  [/\[Search stopped at the history scan limit; narrow the query or inspect files directly\.\]/,
+    () => "[历史搜索达到扫描上限；请缩小查询范围或直接查看文件。]"],
 ];
 
 export function translateSystemText(text = "") {

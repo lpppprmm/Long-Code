@@ -81,10 +81,10 @@
               选择一个项目，在每次专注的会话中持续推进开发。
             </p>
           </div>
-          <div id="session-badge" class="session-badge" hidden>
+          <button id="session-badge" class="session-badge" type="button" title="查看会话历史" hidden>
             <i data-lucide="layers-2"></i
             ><span>会话 <b id="session-number">01</b></span>
-          </div>
+          </button>
         </div>
         <div class="workspace-body">
           <section class="conversation-panel" aria-label="对话">
@@ -152,6 +152,7 @@
               <div id="working" class="working" hidden>
                 <span class="working-dots"><b></b><b></b><b></b></span
                 ><span id="working-label">助手正在处理…</span>
+                <button id="cancel-run" type="button" class="cancel-run">停止任务</button>
               </div>
             </div>
             <div class="composer-area">
@@ -356,6 +357,22 @@
       </form>
       <pre id="history-results" class="history-results">
 搜索即可查找项目以往的决策。</pre>
+    </dialog>
+    <dialog id="sessions-dialog" class="wide-dialog" aria-labelledby="sessions-title">
+      <div class="dialog-heading">
+        <h2 id="sessions-title">会话时间线</h2>
+        <button type="button" class="icon-button" data-close aria-label="关闭对话框">
+          <i data-lucide="x"></i>
+        </button>
+      </div>
+      <p class="dialog-description">选择会话，查看交接摘要和原始记录。</p>
+      <div id="session-list" class="session-list"></div>
+      <h3 id="session-detail-title" class="session-detail-title"></h3>
+      <div id="session-handoff" class="markdown document-content"></div>
+      <div id="session-checkpoint" class="session-checkpoint"></div>
+      <h3 class="session-detail-title">会话记录</h3>
+      <div id="session-records" class="session-records"></div>
+      <button id="session-more" type="button" class="secondary-button" hidden>加载更多记录</button>
     </dialog>
     <script type="module" src="/src/app.js"></script>
   </body>

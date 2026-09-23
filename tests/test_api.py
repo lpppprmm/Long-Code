@@ -1,5 +1,6 @@
 """HTTP integration tests: one runtime, isolated projects, and persistent UI history."""
 
+import os
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
@@ -9,8 +10,9 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from api import create_app
-from session import add_message, save_state
+from api import LazyApp, create_app
+from session import add_message, rollover_session, save_state
+from tools import RunCancelled
 
 
 class TestAgent:
@@ -34,7 +36,12 @@ class TestAgent:
         add_message(project, session, "user", session.active_request)
         self.emit("[tool] read_file")
         self.started.set()
-        if not self.release.wait(timeout=5):
+        for _ in range(500):
+            if self.release.wait(timeout=0.01):
+                break
+            if self.cancel_event.is_set():
+                raise RunCancelled("Run cancelled")
+        else:
             raise RuntimeError("Test request did not finish")
         if self.failure:
             raise RuntimeError("Model temporarily unavailable")
@@ -68,6 +75,14 @@ class APITest(unittest.TestCase):
         self.assertEqual(self.client.get("/api/projects").json(), [])
         self.assertEqual(self.client.get("/docs").status_code, 200)
         self.assertEqual(self.client.get("/").status_code, 404)
+
+    def test_default_app_acquires_data_home_only_when_started(self):
+        lazy = LazyApp()
+        self.assertIsNone(lazy.instance)
+        with (patch.dict(os.environ, SIMPLE_AGENT_HOME=str(self.base / "lazy-home")),
+              TestClient(lazy) as client):
+            self.assertEqual(client.get("/api/state").status_code, 200)
+        self.assertIsNotNone(lazy.instance)
 
     def test_project_creation_and_input_validation(self):
         state = self.create_project()
@@ -152,6 +167,23 @@ class APITest(unittest.TestCase):
                 self.agent.release.set()
             self.assertEqual(run.result(timeout=3).status_code, 200)
 
+    def test_cancel_releases_run_and_retains_request_for_continue(self):
+        self.create_project()
+        self.assertEqual(self.client.post("/api/chat/cancel").json(), {"accepted": False})
+        self.agent.release.clear()
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            run = pool.submit(self.client.post, "/api/chat",
+                              json={"project_id": "first", "message": "Long task"})
+            self.assertTrue(self.agent.started.wait(timeout=3))
+            self.assertEqual(self.client.post("/api/chat/cancel").json(), {"accepted": True})
+            self.assertEqual(run.result(timeout=3).status_code, 200)
+        state = self.client.get("/api/state").json()
+        self.assertFalse(state["busy"])
+        self.assertEqual(state["session"]["active_request"], "Long task")
+        self.assertEqual(state["events"][-1]["status"], "interrupted")
+        self.agent.release.set()
+        self.assertEqual(self.client.post("/api/chat", json={"project_id": "first"}).status_code, 200)
+
     def test_history_search_is_project_scoped(self):
         self.create_project()
         self.client.post("/api/chat", json={"project_id": "first", "message": "FIRST_PRIVATE_MARKER"})
@@ -162,6 +194,26 @@ class APITest(unittest.TestCase):
         other = self.client.get("/api/projects/second/history", params={"query": "FIRST_PRIVATE_MARKER"}).json()
         self.assertIn("FIRST_PRIVATE_MARKER", first["text"])
         self.assertEqual(other["text"], "No matching history.")
+
+    def test_session_timeline_returns_handoffs_and_paged_records(self):
+        self.create_project()
+        workspace = self.app.state.workspace
+        project, session = workspace.runtime.project, workspace.runtime.session
+        session.active_request = "Finish the parser"
+        session.todos = [{"content": "Check parser", "status": "pending"}]
+        add_message(project, session, "user", "FIRST_SESSION_MESSAGE")
+        rollover_session(project, session, lambda _prompt, _data: "## Current State\n\nParser in progress")
+        sessions = self.client.get("/api/projects/first/sessions").json()
+        self.assertEqual([item["id"] for item in sessions], [2, 1])
+        self.assertTrue(sessions[1]["has_handoff"])
+        detail = self.client.get("/api/projects/first/sessions/1", params={"limit": 1}).json()
+        self.assertIn("Parser in progress", detail["handoff"])
+        self.assertEqual(detail["checkpoint"]["unfinished_todos"], session.todos)
+        self.assertIsNotNone(detail["next_offset"])
+        rest = self.client.get("/api/projects/first/sessions/1",
+                               params={"offset": detail["next_offset"]}).json()
+        self.assertIn("FIRST_SESSION_MESSAGE", str(rest["records"]))
+        self.assertEqual(self.client.get("/api/projects/first/sessions/99").status_code, 404)
 
     def test_cors_allows_only_configured_frontend_origins(self):
         allowed = self.client.options("/api/chat", headers={"Origin": "http://127.0.0.1:5173", "Access-Control-Request-Method": "POST", "Access-Control-Request-Headers": "content-type"})

@@ -80,9 +80,13 @@ let state = { project: null, session: null, events: [], busy: false };
 let projects = [];
 let connected = false;
 let pending = false;
+let cancelRequested = false;
 let generation = 0;
 let eventSignature = "";
+let renderedProjectId = null;
 let projectSignature = "";
+let selectedSession = null;
+let sessionNextOffset = null;
 
 function notice(message = "") {
   $("#notice").textContent = message;
@@ -125,9 +129,19 @@ function renderEvents() {
   eventSignature = signature;
   const log = $("#conversation");
   const nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 100;
-  $("#messages").replaceChildren();
-  for (const event of state.events) {
+  const messages = $("#messages");
+  if (renderedProjectId !== state.project?.id) messages.replaceChildren();
+  renderedProjectId = state.project?.id;
+  const wanted = new Set(state.events.map((event) => event.id));
+  for (const item of [...messages.children]) {
+    if (!wanted.has(item.dataset.eventId)) item.remove();
+  }
+  const existing = [...messages.children];
+  if (existing.some((item, index) => item.dataset.eventId !== state.events[index]?.id))
+    messages.replaceChildren();
+  for (const event of state.events.slice(messages.children.length)) {
     const item = document.createElement("article");
+    item.dataset.eventId = event.id;
     if (event.kind === "activity") {
       item.className = "activity-event";
       item.dataset.status = event.status || "completed";
@@ -148,7 +162,7 @@ function renderEvents() {
       const text = event.kind === "error" ? translateSystemText(event.text) : event.text;
       item.innerHTML = `<div class="message-avatar">${event.kind === "user" ? "我" : '<i data-lucide="terminal"></i>'}</div><div class="message-body"><div class="message-meta"><strong>${name}</strong><time>${escape(time)}</time><span>会话 ${event.session}</span></div><div class="markdown">${event.kind === "user" || event.kind === "error" ? `<p class="plain-message">${escape(text)}</p>` : markdown(text)}</div></div>`;
     }
-    $("#messages").append(item);
+    messages.append(item);
   }
   $("#welcome").hidden = state.events.length > 0;
   drawIcons();
@@ -187,7 +201,7 @@ function render() {
   $("#context-percent").textContent = `${percent}%`;
   $("#context-meter").style.width = `${percent}%`;
   $("#context-tokens").textContent = session
-    ? `≈ ${session.context_tokens.toLocaleString("zh-CN")} / ${session.context_limit_tokens.toLocaleString("zh-CN")} 词元`
+    ? `≈ ${session.context_tokens.toLocaleString("zh-CN")} / ${session.context_limit_tokens.toLocaleString("zh-CN")} 词元${session.last_input_tokens ? ` · 上次实际输入 ${session.last_input_tokens.toLocaleString("zh-CN")}` : ""}`
     : "为下一个想法留出全新空间。";
   $("#compact-count").innerHTML =
     `${session?.compact_count || 0} <span>/ 1</span>`;
@@ -222,6 +236,8 @@ function render() {
   $("#continue").hidden = !session?.active_request || busy;
   $("#continue").disabled = !connected;
   $("#working").hidden = !busy || !project;
+  $("#cancel-run").disabled = cancelRequested || !connected;
+  $("#cancel-run").textContent = cancelRequested ? "正在停止…" : "停止任务";
   document.querySelectorAll(".document-button").forEach((button) => {
     button.disabled = !project;
   });
@@ -236,10 +252,12 @@ function applyState(next) {
     $("#history-results").textContent =
       "搜索即可查找项目以往的决策。";
     document
-      .querySelectorAll("#history-dialog[open], #document-dialog[open]")
+      .querySelectorAll("#history-dialog[open], #document-dialog[open], #sessions-dialog[open]")
       .forEach((dialog) => dialog.close());
+    selectedSession = null;
   }
   state = next;
+  if (!pending && !next.busy) cancelRequested = false;
   connected = true;
   render();
 }
@@ -255,9 +273,24 @@ async function openProject(id) {
     notice(error.message);
   } finally {
     pending = false;
+    cancelRequested = false;
     generation++;
     render();
   }
+}
+
+async function cancelRun() {
+  if ((!pending && !state.busy) || cancelRequested) return;
+  cancelRequested = true;
+  render();
+  try {
+    const response = await request("/chat/cancel", {});
+    if (!response.accepted) cancelRequested = false;
+  } catch (error) {
+    cancelRequested = false;
+    notice(error.message);
+  }
+  render();
 }
 
 async function send(message) {
@@ -285,6 +318,7 @@ async function send(message) {
       $("#message").value = message;
   } finally {
     pending = false;
+    cancelRequested = false;
     generation++;
     render();
     if (!$("#message").disabled) $("#message").focus();
@@ -338,6 +372,7 @@ $("#chat-form").addEventListener("submit", (event) => {
   if (text) send(text);
 });
 $("#continue").addEventListener("click", () => send(null));
+$("#cancel-run").addEventListener("click", cancelRun);
 document
   .querySelectorAll("[data-close]")
   .forEach((button) =>
@@ -428,6 +463,73 @@ document.querySelectorAll("[data-document]").forEach((button) =>
 $("#history-button").addEventListener("click", () =>
   $("#history-dialog").showModal(),
 );
+
+async function loadSession(projectId, id, offset = 0) {
+  selectedSession = id;
+  if (offset === 0) {
+    $("#session-detail-title").textContent = `会话 ${id}`;
+    $("#session-handoff").textContent = "正在加载交接摘要…";
+    $("#session-checkpoint").textContent = "";
+    $("#session-records").replaceChildren();
+  }
+  try {
+    const detail = await request(`/projects/${encodeURIComponent(projectId)}/sessions/${id}?offset=${offset}`);
+    if (state.project?.id !== projectId || selectedSession !== id) return;
+    document.querySelectorAll("#session-list button").forEach((button) =>
+      button.setAttribute("aria-current", String(Number(button.dataset.session) === id)),
+    );
+    if (offset === 0) {
+      $("#session-handoff").innerHTML = markdown(detail.handoff || "当前会话尚未生成交接摘要。");
+      const checkpoint = detail.checkpoint || {};
+      const commands = checkpoint.recent_commands || [];
+      $("#session-checkpoint").textContent = checkpoint.created_at
+        ? `检查点：${checkpoint.created_at} · 未完成待办 ${(checkpoint.unfinished_todos || []).length} 项 · 最近命令 ${commands.length} 条`
+        : "此会话没有程序检查点。";
+    }
+    for (const record of detail.records) {
+      const item = document.createElement("article");
+      item.className = "session-record";
+      const title = document.createElement("strong");
+      title.textContent = `${record.role} · 第 ${record.line} 行`;
+      const body = document.createElement("pre");
+      body.textContent = record.text;
+      item.append(title, body);
+      $("#session-records").append(item);
+    }
+    sessionNextOffset = detail.next_offset;
+    $("#session-more").hidden = sessionNextOffset === null;
+  } catch (error) {
+    if (state.project?.id === projectId && selectedSession === id)
+      $("#session-handoff").textContent = error.message;
+  }
+}
+
+$("#session-badge").addEventListener("click", async () => {
+  const projectId = state.project?.id;
+  if (!projectId) return;
+  $("#sessions-dialog").showModal();
+  $("#session-list").textContent = "正在加载会话…";
+  try {
+    const sessions = await request(`/projects/${encodeURIComponent(projectId)}/sessions`);
+    if (state.project?.id !== projectId) return;
+    $("#session-list").replaceChildren();
+    for (const session of sessions) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.dataset.session = String(session.id);
+      button.textContent = `会话 ${session.id}${session.current ? "（当前）" : ""}`;
+      button.addEventListener("click", () => loadSession(projectId, session.id));
+      $("#session-list").append(button);
+    }
+    if (sessions.length) await loadSession(projectId, sessions.find((item) => item.has_handoff)?.id || sessions[0].id);
+  } catch (error) {
+    if (state.project?.id === projectId) $("#session-list").textContent = error.message;
+  }
+});
+$("#session-more").addEventListener("click", () => {
+  if (state.project && selectedSession !== null && sessionNextOffset !== null)
+    loadSession(state.project.id, selectedSession, sessionNextOffset);
+});
 $("#history-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const projectId = state.project?.id;

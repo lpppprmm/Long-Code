@@ -5,11 +5,11 @@ import os
 from collections import deque
 from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
-from threading import Lock
+from threading import Event, Lock
 from uuid import uuid4
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
@@ -22,10 +22,13 @@ from session import (
     configured_context_limit,
     estimate_context,
     estimate_tokens,
+    list_sessions,
     read_preview,
     search_history,
+    session_history,
     timestamp,
 )
+from tools import RunCancelled
 
 MAX_EVENT_LOG_BYTES = 4 * 1024 * 1024
 COMPACT_EVENT_LOG_BYTES = MAX_EVENT_LOG_BYTES // 2
@@ -49,6 +52,9 @@ class Workspace:
         self.runtime.agent.emit = self.emit
         self.runtime.agent.on_event = self.activity
         self.lock = Lock()
+        self.cancel_event = Event()
+        self.chat_active = False
+        self.runtime.agent.cancel_event = self.cancel_event
         self.events = deque(maxlen=200)
         self.view = {}
         self.phase = None
@@ -86,6 +92,10 @@ class Workspace:
                 "context_limit": self.runtime.agent.context_limit,
                 "context_tokens": estimate_tokens(context_size),
                 "context_limit_tokens": estimate_tokens(self.runtime.agent.context_limit),
+                "last_input_tokens": session.last_input_tokens,
+                "last_output_tokens": session.last_output_tokens,
+                "total_input_tokens": session.total_input_tokens,
+                "total_output_tokens": session.total_output_tokens,
             } if session else None,
             "events": list(self.events), "documents": documents,
             "model": self.runtime.agent.model,
@@ -219,6 +229,22 @@ def create_app(data_home=None, agent=None):
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
 
+    @app.get("/api/projects/{project_id}/sessions")
+    def sessions(project_id: str):
+        try:
+            return list_sessions(workspace.runtime.registry.open(project_id))
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @app.get("/api/projects/{project_id}/sessions/{session_id}")
+    def session_detail(project_id: str, session_id: int,
+                       offset: int = Query(default=0, ge=0),
+                       limit: int = Query(default=50, ge=1, le=100)):
+        try:
+            return session_history(workspace.runtime.registry.open(project_id), session_id, offset, limit)
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
     @app.post("/api/chat")
     def chat(body: ChatRequest):
         with workspace.operation():
@@ -227,16 +253,46 @@ def create_app(data_home=None, agent=None):
                 raise HTTPException(409, "The selected project changed. Refresh before sending.")
             if body.message is None and not runtime.session.active_request:
                 raise HTTPException(400, "There is no unfinished request to continue.")
+            workspace.cancel_event.clear()
+            workspace.chat_active = True
             try:
                 runtime.agent.get_client()
                 workspace.record("user", body.message or "Continue the unfinished request.")
                 runtime.agent.run(runtime.project, runtime.session, body.message)
+            except RunCancelled:
+                workspace.record("activity", "Run cancelled; unfinished request retained",
+                                 activity="run", status="interrupted")
             except Exception as exc:
                 workspace.record("error", str(exc))
                 raise HTTPException(502, str(exc)) from exc
+            finally:
+                workspace.chat_active = False
+                workspace.cancel_event.clear()
         return workspace.state()
+
+    @app.post("/api/chat/cancel")
+    def cancel_chat():
+        if not workspace.chat_active:
+            return {"accepted": False}
+        workspace.cancel_event.set()
+        return {"accepted": True}
 
     return app
 
 
-app = create_app()
+class LazyApp:
+    """Create the default workspace when the ASGI server starts, not on import."""
+
+    def __init__(self):
+        self.instance = None
+        self.lock = Lock()
+
+    async def __call__(self, scope, receive, send):
+        if self.instance is None:
+            with self.lock:
+                if self.instance is None:
+                    self.instance = create_app()
+        await self.instance(scope, receive, send)
+
+
+app = LazyApp()

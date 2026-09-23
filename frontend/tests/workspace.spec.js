@@ -5,6 +5,9 @@ async function mockWorkspace(page) {
   const events = {};
   let fail = false;
   let dropNextChat = false;
+  let holdNextChat = false;
+  let releaseChat = null;
+  let cancelled = false;
   let nextId = 0;
   let state = { project: null, session: null, events: [], busy: false, model: 'test-model', documents: {} };
   const select = project => {
@@ -21,6 +24,16 @@ async function mockWorkspace(page) {
     let data;
     if (path === '/api/state') data = state;
     else if (path === '/api/projects' && request.method() === 'GET') data = projects;
+    else if (path === '/api/chat/cancel') {
+      if (!state.busy) data = { accepted: false };
+      else {
+        cancelled = true;
+        state.busy = false;
+        state.events.push({ id: String(++nextId), kind: 'activity', text: 'Run cancelled; unfinished request retained', status: 'interrupted', time: new Date().toISOString(), session: 1 });
+        releaseChat?.();
+        data = { accepted: true };
+      }
+    }
     else if (path === '/api/projects') {
       const project = { id: body.name.toLowerCase().replaceAll(' ', '-'), name: body.name, root: body.root };
       projects.push(project);
@@ -29,6 +42,20 @@ async function mockWorkspace(page) {
     } else if (path.endsWith('/open')) {
       select(projects.find(project => path.includes(`/${project.id}/`)));
       data = state;
+    } else if (path.endsWith('/sessions')) {
+      data = [
+        { id: 2, current: true, has_handoff: false, has_transcript: true },
+        { id: 1, current: false, has_handoff: true, has_transcript: true },
+      ];
+    } else if (path.includes('/sessions/')) {
+      const id = Number(path.split('/').at(-1));
+      const offset = Number(new URL(request.url()).searchParams.get('offset') || 0);
+      data = { id, current: id === 2,
+        handoff: id === 1 ? '# Session Handoff\n\nParser ready.' : '',
+        checkpoint: id === 1 ? { created_at: '2026-09-23', unfinished_todos: [{ content: 'Verify parser' }], recent_commands: [] } : {},
+        records: offset === 0 ? [{ line: 1, role: 'user', text: 'Build the parser' }] : [{ line: 2, role: 'assistant', text: 'Parser ready.' }],
+        next_offset: offset === 0 ? 1 : null,
+      };
     } else if (path.endsWith('/history')) data = { text: 'session_001.jsonl:12\nUse the official SDK.' };
     else if (path === '/api/chat') {
       if (dropNextChat) {
@@ -39,6 +66,17 @@ async function mockWorkspace(page) {
       state.events.push({ id: String(++nextId), kind: 'user', text: body.message || 'Continue', time: new Date().toISOString(), session: 1 });
       state.busy = true;
       state.session.active_request = body.message || state.session.active_request;
+      if (holdNextChat) {
+        holdNextChat = false;
+        state.events.push({ id: String(++nextId), kind: 'activity', text: 'bash completed', status: 'completed', output: 'test output', time: new Date().toISOString(), session: 1 });
+        await new Promise(resolve => { releaseChat = resolve; });
+        releaseChat = null;
+        if (cancelled) {
+          cancelled = false;
+          await route.fulfill({ json: state });
+          return;
+        }
+      }
       if (fail) {
         state.events.push({ id: String(++nextId), kind: 'error', text: 'Model unavailable', time: new Date().toISOString(), session: 1 });
         state.busy = false;
@@ -57,6 +95,7 @@ async function mockWorkspace(page) {
   return {
     setFailure: value => { fail = value; },
     dropNextChat: () => { dropNextChat = true; },
+    holdNextChat: () => { holdNextChat = true; },
   };
 }
 
@@ -151,4 +190,32 @@ test('a draft survives a chat request that never reaches the API', async ({ page
   await page.getByRole('button', { name: '发送消息' }).click();
   await expect(composer).toHaveValue('Keep this draft');
   await expect(page.locator('.message-user')).toHaveCount(0);
+});
+
+test('session timeline shows archived handoff and paged records', async ({ page }) => {
+  await mockWorkspace(page);
+  await page.goto('/');
+  await createProject(page);
+  await page.locator('#session-badge').click();
+  await expect(page.getByRole('dialog', { name: '会话时间线' })).toBeVisible();
+  await expect(page.locator('#session-handoff')).toContainText('Parser ready.');
+  await expect(page.locator('#session-records')).toContainText('Build the parser');
+  await page.getByRole('button', { name: '加载更多记录' }).click();
+  await expect(page.locator('#session-records')).toContainText('Parser ready.');
+});
+
+test('stopping a run keeps its request and expanded tool preview', async ({ page }) => {
+  const mock = await mockWorkspace(page);
+  await page.goto('/');
+  await createProject(page);
+  mock.holdNextChat();
+  await page.getByRole('textbox', { name: '消息', exact: true }).fill('Run a long task');
+  await page.getByRole('button', { name: '发送消息' }).click();
+  const preview = page.locator('.activity-event details');
+  await expect(preview).toBeVisible();
+  await preview.locator('summary').click();
+  await expect(preview).toHaveAttribute('open', '');
+  await page.getByRole('button', { name: '停止任务' }).click();
+  await expect(page.getByRole('button', { name: '继续未完成的请求' })).toBeVisible();
+  await expect(preview).toHaveAttribute('open', '');
 });

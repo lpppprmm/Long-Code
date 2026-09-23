@@ -103,9 +103,12 @@ the listener with `lsof -i :8000` or `lsof -i :5173`. Stop both services with
 
 The frontend offers project
 creation and switching, chat, progress updates, context usage, todos, project
-documents, history search, and continuation of unfinished requests. Responses
+documents, history search, a session timeline, and continuation of unfinished requests. Responses
 render as sanitized Markdown. The page polls for progress while a chat request
 runs, so tool activity and session transitions appear before the request finishes.
+Use **停止任务** during a run to stop the next agent step or an active Bash command.
+The unfinished request remains available through **继续未完成的请求**. A model API
+call already in flight finishes before cancellation takes effect.
 Tool activity includes the command or file target, running/completed/failed status,
 elapsed time, and an expandable result preview. Compaction and handoff phases are
 shown while they run, including summary retries.
@@ -137,8 +140,10 @@ npm test           # Browser tests use mocked API responses, no model calls
 ```
 
 The API exposes `GET /api/projects`, `POST /api/projects`,
-`POST /api/projects/{id}/open`, `GET /api/state`, `POST /api/chat`, and
-`GET /api/projects/{id}/history?query=...`. Chat requires `project_id` and a
+`POST /api/projects/{id}/open`, `GET /api/state`, `POST /api/chat`,
+`POST /api/chat/cancel`,
+`GET /api/projects/{id}/history?query=...`, and the session list/detail routes
+under `GET /api/projects/{id}/sessions`. Chat requires `project_id` and a
 `message`; omit `message` to continue the current unfinished request. API keys
 stay in the backend environment and are never sent to the browser.
 
@@ -150,6 +155,8 @@ project has its own directory under `~/.simple-agent/projects/<id>/`:
 - `PROJECT.md`: user-maintained long-term goals, constraints, and design decisions.
 - `state.json`: program-owned session number, compaction count, request, and todos.
 - `HANDOFF.md` and `handoffs/session_NNN.md`: latest and archived working handoffs.
+- `checkpoints/session_NNN.json`: program-recorded request, unfinished todos,
+  recent command outcomes, Git state, relevant file hashes, and token totals.
 - `transcripts/session_NNN.jsonl`: append-only messages and compaction events.
 - `tool-results/`: outputs too large to include in model context.
 
@@ -161,12 +168,18 @@ the handoff, and the active request. Files and tests outrank the handoff.
 The first compaction preserves a small suffix of complete tool exchanges and a
 summary; it never overwrites the original transcript. The next compaction archives
 the handoff, advances the session, clears messages, and bootstraps automatically.
-Unfinished todos are recorded verbatim in the handoff. Rollover continues the same
+Unfinished todos are recorded verbatim in the handoff and carried into the new
+session's structured todo list. Rollover continues the same
 request without user intervention. Reopening restores the session counter and
-compaction count, then inspects the repository again without replaying transcripts.
+compaction count, then inspects the repository and compares the checkpoint's Git
+state and recorded file hashes without replaying transcripts. The comparison
+result is written to the new session's transcript.
 Historical details can be retrieved with `search_history`.
+The session badge in the browser opens archived handoffs and paged transcript
+records, including for projects created before checkpoints were introduced.
 
-State, registry, and handoffs use atomic replacement. Messages are flushed to the
+State, registry, handoffs, and project file writes use atomic replacement. A failed
+project registration removes its newly created data directory. Messages are flushed to the
 transcript as they arrive. If execution is interrupted, an external command may
 have made partial changes; the agent is instructed to inspect before retrying.
 A crash immediately after the model's final response may leave the request marked
@@ -180,7 +193,9 @@ the repository, including symlink escapes, except for the explicit
 `agent://PROJECT.md` path for persistent requirements. Both `write_file` and
 `edit_file` support that path. Other agent data, including state, handoffs, and
 transcripts, is read-only through file tools. `read_file` accepts `agent://...`
-for this project's data and saved outputs. History search never
+for this project's data and saved outputs. Each read is limited to 1,000 lines
+and 100,000 characters, with a maximum starting offset of 100,000 lines. History
+search scans at most 32 MiB per request and reports when it stops early; it never
 searches another project. Bash uses the project root as its working directory;
 it **is not a security sandbox** and executes with the CLI user's permissions.
 Commands run synchronously with a default 120-second timeout (maximum 600 seconds).
@@ -209,10 +224,12 @@ to apply it. A smaller value, such as `20000`, demonstrates compaction and
 rollover sooner. The first threshold crossing compacts the session; the next
 creates a handoff and a fresh session.
 
-The frontend displays estimated tokens using four characters per token, matching
-the runtime's lightweight character-based threshold. This is an approximation of
-message history, not a model-specific tokenizer or a hard provider context limit;
-actual token usage varies with the model and text. The token setting takes
+The frontend displays estimated tokens using four characters per token and, after
+a model response, its actual input-token count. Before any measured usage is
+available, the runtime uses the character estimate. After a response, it projects
+the next input size from the measured token count plus new message characters,
+reserving space for output. This projection is still approximate because message
+content and model overhead change. The token setting takes
 precedence over the legacy character setting. `MAX_TOKENS` controls response
 length independently.
 

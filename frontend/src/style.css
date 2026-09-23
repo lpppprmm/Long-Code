@@ -497,6 +497,10 @@ h1 {
   color: #536d46;
   margin-left: 3px;
 }
+.session-badge:hover {
+  background: #f0f5e9;
+  cursor: pointer;
+}
 .workspace-body {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 278px;
@@ -1237,6 +1241,19 @@ h1 {
 .working-dots b:nth-child(3) {
   animation-delay: 0.3s;
 }
+.cancel-run {
+  margin-left: 8px;
+  padding: 3px 9px;
+  border: 1px solid #d6ded0;
+  border-radius: 6px;
+  background: #fff;
+  color: #526348;
+  cursor: pointer;
+}
+.cancel-run:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
 dialog {
   border: 1px solid #e4eada;
   border-radius: 14px;
@@ -1371,6 +1388,58 @@ dialog input::placeholder {
   border-radius: 7px;
   max-height: 50dvh;
   overflow: auto;
+}
+.session-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.session-list button {
+  border: 1px solid #dce7d4;
+  border-radius: 6px;
+  background: #f8fbf4;
+  color: #59734b;
+  padding: 8px 11px;
+}
+.session-list button[aria-current="true"] {
+  background: #456c36;
+  color: white;
+}
+.session-detail-title {
+  color: #526d46;
+  font-size: 14px;
+  margin: 22px 0 10px;
+}
+.session-checkpoint {
+  color: #748a63;
+  font-size: 12px;
+  line-height: 1.7;
+  margin-top: 12px;
+}
+.session-records {
+  display: grid;
+  gap: 10px;
+  max-height: 35dvh;
+  overflow: auto;
+  margin-bottom: 12px;
+}
+.session-record {
+  border: 1px solid #e6ecdd;
+  border-radius: 6px;
+  background: #f7f9f2;
+  padding: 10px;
+}
+.session-record strong {
+  color: #526d46;
+  font-size: 11px;
+}
+.session-record pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: #627657;
+  font-size: 11px;
+  line-height: 1.6;
+  margin-top: 5px;
 }
 @keyframes pulse {
   50% {

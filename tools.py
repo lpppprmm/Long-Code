@@ -5,7 +5,6 @@ import os
 import selectors
 import signal
 import subprocess
-from itertools import islice
 from pathlib import Path
 from time import monotonic
 from uuid import uuid4
@@ -13,6 +12,13 @@ from uuid import uuid4
 from session import MAX_TOOL_OUTPUT, atomic_write, safe_path, save_state, search_history
 
 MAX_BASH_OUTPUT_BYTES = 10 * 1024 * 1024
+MAX_READ_LINES = 1000
+MAX_READ_CHARS = 100_000
+MAX_READ_OFFSET = 100_000
+
+
+class RunCancelled(Exception):
+    """Raised when a user stops a running agent request."""
 
 
 def tool(name, description, properties, required):
@@ -28,8 +34,8 @@ TOOLS = [
          {"command": STRING, "timeout": {"type": "number", "minimum": 1, "maximum": 600}}, ["command"]),
     tool("read_file", "Read a project file with zero-based line offset. For current-project "
          "agent data, use agent://PROJECT.md, agent://HANDOFF.md or agent://tool-results/<file>.",
-         {"path": STRING, "offset": {"type": "integer", "minimum": 0},
-          "limit": {"type": "integer", "minimum": 1}}, ["path"]),
+         {"path": STRING, "offset": {"type": "integer", "minimum": 0, "maximum": MAX_READ_OFFSET},
+          "limit": {"type": "integer", "minimum": 1, "maximum": MAX_READ_LINES}}, ["path"]),
     tool("write_file", "Write a UTF-8 project file or agent://PROJECT.md; other agent data is read-only.",
          {"path": STRING, "content": STRING}, ["path", "content"]),
     tool("edit_file", "Replace exactly one old_text in a project file or agent://PROJECT.md; other agent data is read-only.",
@@ -45,7 +51,7 @@ TOOLS = [
 ]
 
 
-def run_bash(project, command: str, timeout: float = 120):
+def run_bash(project, command: str, timeout: float = 120, cancel_event=None):
     if not isinstance(command, str) or not command.strip() or not 1 <= timeout <= 600:
         raise ValueError("Use a nonempty command and a timeout from 1 to 600 seconds")
     process = subprocess.Popen(
@@ -53,12 +59,15 @@ def run_bash(project, command: str, timeout: float = 120):
         stderr=subprocess.STDOUT, start_new_session=True,
     )
     output = bytearray()
-    timed_out = too_large = False
+    timed_out = too_large = cancelled = False
     deadline = monotonic() + timeout
     with selectors.DefaultSelector() as selector:
         selector.register(process.stdout, selectors.EVENT_READ)
         try:
             while True:
+                if cancel_event is not None and cancel_event.is_set():
+                    cancelled = True
+                    break
                 remaining = deadline - monotonic()
                 if remaining <= 0:
                     timed_out = True
@@ -70,10 +79,18 @@ def run_bash(project, command: str, timeout: float = 120):
                     continue
                 chunk = os.read(process.stdout.fileno(), 65536)
                 if not chunk:
-                    try:
-                        process.wait(timeout=max(0, deadline - monotonic()))
-                    except subprocess.TimeoutExpired:
-                        timed_out = True
+                    while process.poll() is None:
+                        if cancel_event is not None and cancel_event.is_set():
+                            cancelled = True
+                            break
+                        remaining = deadline - monotonic()
+                        if remaining <= 0:
+                            timed_out = True
+                            break
+                        try:
+                            process.wait(timeout=min(remaining, 0.1))
+                        except subprocess.TimeoutExpired:
+                            pass
                     break
                 available = MAX_BASH_OUTPUT_BYTES - len(output)
                 output.extend(chunk[:available])
@@ -88,6 +105,8 @@ def run_bash(project, command: str, timeout: float = 120):
             process.wait()
             process.stdout.close()
     text = output.decode("utf-8", errors="replace") or "(no output)"
+    if cancelled:
+        raise RunCancelled("Run cancelled; unfinished request retained")
     if timed_out:
         raise RuntimeError(f"Command timed out after {timeout}s\n{text}")
     if too_large:
@@ -109,21 +128,42 @@ def file_path(project, path: str, *, write=False):
 
 
 def read_file(project, path: str, offset: int = 0, limit: int = 200):
-    if type(offset) is not int or type(limit) is not int or offset < 0 or limit < 1:
-        raise ValueError("offset must be nonnegative and limit must be positive integers")
+    if (type(offset) is not int or type(limit) is not int
+            or not 0 <= offset <= MAX_READ_OFFSET or not 1 <= limit <= MAX_READ_LINES):
+        raise ValueError(f"offset must be 0–{MAX_READ_OFFSET} and limit must be 1–{MAX_READ_LINES}")
     fp = file_path(project, path)
     with fp.open(encoding="utf-8") as handle:
-        lines = list(islice(handle, offset, offset + limit + 1))
-    result = "".join(f"{offset + i + 1}: {line}" for i, line in enumerate(lines[:limit]))
-    if len(lines) > limit:
-        result += f"\n[More lines; continue with offset={offset + limit}]"
+        for _ in range(offset):
+            line = handle.readline(MAX_READ_CHARS + 1)
+            if not line:
+                return "(no lines)"
+            if len(line) > MAX_READ_CHARS and not line.endswith("\n"):
+                raise ValueError("A line exceeds the read_file size limit")
+        lines = []
+        used = 0
+        for _ in range(limit):
+            line = handle.readline(MAX_READ_CHARS - used + 1)
+            if not line:
+                break
+            if len(line) > MAX_READ_CHARS - used:
+                if not lines:
+                    raise ValueError("A line exceeds the read_file size limit; use bash for focused byte ranges")
+                break
+            lines.append(line)
+            used += len(line)
+            if used == MAX_READ_CHARS:
+                break
+        more = bool(handle.read(1)) if len(lines) == limit or used == MAX_READ_CHARS else bool(line)
+    result = "".join(f"{offset + i + 1}: {line}" for i, line in enumerate(lines))
+    if more:
+        result += f"\n[More lines; continue with offset={offset + len(lines)}]"
     return result or "(no lines)"
 
 
 def write_file(project, path: str, content: str):
     fp = file_path(project, path, write=True)
     fp.parent.mkdir(parents=True, exist_ok=True)
-    fp.write_text(content, encoding="utf-8")
+    atomic_write(fp, content, preserve_mode=True)
     return f"Wrote {len(content)} characters to {path}"
 
 
@@ -132,7 +172,7 @@ def edit_file(project, path: str, old_text: str, new_text: str):
     content = fp.read_text(encoding="utf-8")
     if not old_text or content.count(old_text) != 1:
         raise ValueError("old_text must match exactly once; include more surrounding context")
-    fp.write_text(content.replace(old_text, new_text, 1), encoding="utf-8")
+    atomic_write(fp, content.replace(old_text, new_text, 1), preserve_mode=True)
     return f"Edited {path}"
 
 
@@ -172,9 +212,9 @@ def persist_output(project, output: str, limit=MAX_TOOL_OUTPUT):
     return output[:max(0, limit - len(marker))] + marker
 
 
-def execute_tool(project, session, block, output_limit=MAX_TOOL_OUTPUT):
+def execute_tool(project, session, block, output_limit=MAX_TOOL_OUTPUT, cancel_event=None):
     handlers = {
-        "bash": lambda **args: run_bash(project, **args),
+        "bash": lambda **args: run_bash(project, cancel_event=cancel_event, **args),
         "read_file": lambda **args: read_file(project, **args),
         "write_file": lambda **args: write_file(project, **args),
         "edit_file": lambda **args: edit_file(project, **args),

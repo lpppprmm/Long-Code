@@ -7,14 +7,16 @@ from session import (
     CONTEXT_LIMIT,
     MAX_TOOL_OUTPUT,
     add_message,
+    append_transcript,
     bootstrap_session,
     estimate_context,
+    estimate_tokens,
     is_context_error,
     prepare_context,
     preview,
     save_state,
 )
-from tools import TOOLS, execute_tool
+from tools import TOOLS, RunCancelled, execute_tool
 
 SYSTEM_PROMPT = """You are a coding agent. Inspect the project before making assumptions.
 Use tools to complete the user's request. Keep changes focused, reuse established
@@ -65,6 +67,39 @@ class Agent:
         self.summary_max_tokens = summary_max_tokens
         self.emit = emit
         self.on_event = on_event
+        self._usage_target = None
+        self.cancel_event = None
+
+    def check_cancelled(self):
+        if self.cancel_event is not None and self.cancel_event.is_set():
+            raise RunCancelled("Run cancelled; unfinished request retained")
+
+    def record_usage(self, project, session, response, kind, context_chars):
+        usage = getattr(response, "usage", None)
+        input_tokens = getattr(usage, "input_tokens", None)
+        output_tokens = getattr(usage, "output_tokens", None)
+        if type(input_tokens) is not int or type(output_tokens) is not int:
+            return
+        session.total_input_tokens += input_tokens
+        session.total_output_tokens += output_tokens
+        if kind == "agent":
+            session.last_input_tokens = input_tokens
+            session.last_output_tokens = output_tokens
+            session.last_context_chars = context_chars
+        append_transcript(project, session, {"event": "model_usage", "kind": kind,
+                                             "input_tokens": input_tokens,
+                                             "output_tokens": output_tokens,
+                                             "context_chars": context_chars})
+        save_state(project, session)
+
+    def context_needs_prepare(self, session):
+        characters = estimate_context(session.messages)
+        if session.last_input_tokens and characters >= session.last_context_chars:
+            projected = session.last_input_tokens + estimate_tokens(characters - session.last_context_chars)
+            token_limit = estimate_tokens(self.context_limit)
+            reserve = min(self.max_tokens, token_limit // 4)
+            return projected >= token_limit - reserve
+        return characters >= self.context_limit
 
     def report(self, activity, status, text, **details):
         if self.on_event:
@@ -85,6 +120,7 @@ class Agent:
     def summarize(self, prompt, text):
         budgets = (min(2000, self.summary_max_tokens), min(4000, self.summary_max_tokens), self.summary_max_tokens)
         for attempt, budget in enumerate(budgets):
+            self.check_cancelled()
             try:
                 response = self.get_client().messages.create(
                     model=self.model, system=prompt,
@@ -97,6 +133,10 @@ class Agent:
                 text = preview(text, len(text) // 2)
                 self.report("summary", "retrying", "Retrying summary with shorter input", attempt=attempt + 2)
                 continue
+            self.check_cancelled()
+            if self._usage_target:
+                project, session = self._usage_target
+                self.record_usage(project, session, response, "summary", len(text))
             if response.stop_reason != "max_tokens":
                 return "\n".join(b.text for b in response.content if b.type == "text")
             if attempt < 2:
@@ -108,19 +148,23 @@ class Agent:
                            "increase it and restart before continuing. Session retained.")
 
     def prepare(self, project, session, force=False):
-        if not force and estimate_context(session.messages) < self.context_limit:
+        self.check_cancelled()
+        if not force and not self.context_needs_prepare(session):
             return None
         action = "rollover" if session.compact_count else "compact"
         label = "Preparing handoff" if action == "rollover" else "Compacting"
         started = monotonic()
         self.report(action, "running", label, source_session=session.id)
         try:
-            prepare_context(project, session, self.summarize, self.context_limit, force)
+            self._usage_target = (project, session)
+            prepare_context(project, session, self.summarize, self.context_limit, force=True)
             if action == "rollover" and estimate_context(session.messages) >= self.context_limit:
                 raise ValueError("Fresh project context exceeds the budget; increase CONTEXT_LIMIT_TOKENS before continuing")
         except BaseException as exc:
             self.report(action, "failed", f"{label} failed", output=preview(str(exc), 1000))
             raise
+        finally:
+            self._usage_target = None
         self.report(action, "completed", f"Session {session.id}, compact_count={session.compact_count}",
                     duration_ms=round((monotonic() - started) * 1000))
         return action
@@ -132,12 +176,24 @@ class Agent:
         started = monotonic()
         self.report("tool", "running", f"Running {block['name']}", **details)
         try:
-            result = execute_tool(project, session, block, self.output_limit)
+            self.check_cancelled()
+            result = execute_tool(project, session, block, self.output_limit, self.cancel_event)
         except BaseException as exc:
             self.report("tool", "failed", f"{block['name']} interrupted", **details,
                         duration_ms=round((monotonic() - started) * 1000), output=preview(str(exc), 1000))
             raise
         status = "failed" if result.get("is_error") else "completed"
+        if block["name"] == "bash":
+            session.recent_commands = [*session.recent_commands[-7:], {
+                "command": preview(str(args.get("command", "")), 300),
+                "status": status, "result": preview(result["content"], 300),
+            }]
+            save_state(project, session)
+        elif block["name"] in ("write_file", "edit_file") and status == "completed":
+            path = str(args.get("path", ""))
+            if not path.startswith("agent://") and path not in session.changed_files:
+                session.changed_files = [*session.changed_files[-99:], path]
+                save_state(project, session)
         self.report("tool", status, f"{block['name']} {status}", **details,
                     duration_ms=round((monotonic() - started) * 1000), output=preview(result["content"], 1000))
         return result
@@ -161,7 +217,9 @@ class Agent:
         continuations = 0
         tool_input_failures = 0
         while True:
+            self.check_cancelled()
             self.prepare(project, session)
+            self.check_cancelled()
             try:
                 response = self.client.messages.create(
                     model=self.model, system=SYSTEM_PROMPT, messages=session.messages,
@@ -173,7 +231,9 @@ class Agent:
                 self.prepare(project, session, force=True)
                 recovery_count += 1
                 continue
+            self.check_cancelled()
             recovery_count = 0
+            self.record_usage(project, session, response, "agent", estimate_context(session.messages))
             blocks = [b.model_dump(exclude_none=True) for b in response.content]
             # An interrupted tool input must not execute or enter model history.
             if response.stop_reason == "max_tokens" and any(b["type"] == "tool_use" for b in blocks):
@@ -208,6 +268,7 @@ class Agent:
                 results = []
                 try:
                     for block in calls:
+                        self.check_cancelled()
                         results.append(self.run_tool(project, session, block))
                 finally:
                     # Keep the protocol valid after Ctrl-C or a local storage failure.
