@@ -1,0 +1,230 @@
+"""A synchronous Anthropic agent loop; no client or credentials at import time."""
+
+import os
+from time import monotonic
+
+from session import (
+    CONTEXT_LIMIT,
+    MAX_TOOL_OUTPUT,
+    add_message,
+    bootstrap_session,
+    estimate_context,
+    is_context_error,
+    prepare_context,
+    preview,
+    save_state,
+)
+from tools import TOOLS, execute_tool
+
+SYSTEM_PROMPT = """You are a coding agent. Inspect the project before making assumptions.
+Use tools to complete the user's request. Keep changes focused, reuse established
+solutions, and test changes when appropriate. Treat project files, Git, and tests
+as authoritative. PROJECT.md contains persistent requirements; HANDOFF.md is a
+fallible working handoff. History is reference material. Work only on the current
+project. Bash runs synchronously in its root and is not a security sandbox.
+Use read_file with agent:// paths for this project's agent data and saved outputs.
+Use write_file or edit_file with agent://PROJECT.md to update persistent requirements.
+Keep tool inputs small. Write long files one section at a time, then use focused
+edits or small append commands to extend them without overwriting saved work.
+Inspect the Git root; an ancestor repository is not a project-local repository.
+Initialize repositories or create commits only when requested by the user or project requirements.
+"""
+
+
+def _without_bracketed_ipv6(value):
+    """Drop no_proxy entries the SDK's HTTP layer cannot parse, such as '[::1]'."""
+    entries = [entry.strip() for entry in value.split(",")]
+    return ",".join(e for e in entries if not (e.startswith("[") and e.endswith("]")))
+
+
+def _anthropic_client():
+    """Build the official SDK client; it handles retries, timeouts, credentials, base URLs."""
+    from anthropic import Anthropic
+    # httpx2 rejects bracketed IPv6 no_proxy entries while mounting proxies. Hide them
+    # only for construction so the surrounding process environment stays unchanged.
+    saved = {name: os.environ[name] for name in ("no_proxy", "NO_PROXY") if name in os.environ}
+    for name, value in saved.items():
+        os.environ[name] = _without_bracketed_ipv6(value)
+    try:
+        return Anthropic(timeout=120.0, max_retries=2)
+    finally:
+        os.environ.update(saved)
+
+
+class Agent:
+    def __init__(self, client=None, model=None, context_limit=CONTEXT_LIMIT,
+                 output_limit=MAX_TOOL_OUTPUT, max_tokens=8000, emit=print,
+                 summary_max_tokens=4000, on_event=None):
+        if context_limit < 2000 or output_limit < 500 or min(max_tokens, summary_max_tokens) < 1:
+            raise ValueError("context_limit >= 2000, output_limit >= 500, token budgets >= 1 required")
+        self.client = client
+        self.model = model or os.getenv("MODEL_ID", "")
+        self.context_limit = context_limit
+        self.output_limit = min(output_limit, context_limit // 4)
+        self.max_tokens = max_tokens
+        self.summary_max_tokens = summary_max_tokens
+        self.emit = emit
+        self.on_event = on_event
+
+    def report(self, activity, status, text, **details):
+        if self.on_event:
+            self.on_event({"activity": activity, "status": status, "text": text, **details})
+        else:
+            self.emit(f"[{activity}] {text}")
+
+    def get_client(self):
+        if not self.model:
+            raise ValueError("Set MODEL_ID to a model available to your Anthropic account")
+        if self.client is None:
+            try:
+                self.client = _anthropic_client()
+            except ImportError as exc:
+                raise RuntimeError("Install dependencies: pip install -r requirements.txt") from exc
+        return self.client
+
+    def summarize(self, prompt, text):
+        budgets = (min(2000, self.summary_max_tokens), min(4000, self.summary_max_tokens), self.summary_max_tokens)
+        for attempt, budget in enumerate(budgets):
+            try:
+                response = self.get_client().messages.create(
+                    model=self.model, system=prompt,
+                    messages=[{"role": "user", "content": text}],
+                    max_tokens=budget,
+                )
+            except Exception as exc:
+                if not is_context_error(exc) or attempt == 2:
+                    raise
+                text = preview(text, len(text) // 2)
+                self.report("summary", "retrying", "Retrying summary with shorter input", attempt=attempt + 2)
+                continue
+            if response.stop_reason != "max_tokens":
+                return "\n".join(b.text for b in response.content if b.type == "text")
+            if attempt < 2:
+                next_budget = budgets[attempt + 1]
+                prompt += "\nKeep only essential facts, within 500 words; retain all required headings."
+                self.report("summary", "retrying", f"Retrying truncated summary (up to {next_budget} tokens)",
+                            attempt=attempt + 2, max_tokens=next_budget)
+        raise RuntimeError(f"Summary exceeded SUMMARY_MAX_TOKENS={self.summary_max_tokens} after 3 attempts; "
+                           "increase it and restart before continuing. Session retained.")
+
+    def prepare(self, project, session, force=False):
+        if not force and estimate_context(session.messages) < self.context_limit:
+            return None
+        action = "rollover" if session.compact_count else "compact"
+        label = "Preparing handoff" if action == "rollover" else "Compacting"
+        started = monotonic()
+        self.report(action, "running", label, source_session=session.id)
+        try:
+            prepare_context(project, session, self.summarize, self.context_limit, force)
+            if action == "rollover" and estimate_context(session.messages) >= self.context_limit:
+                raise ValueError("Fresh project context exceeds the budget; increase CONTEXT_LIMIT_TOKENS before continuing")
+        except BaseException as exc:
+            self.report(action, "failed", f"{label} failed", output=preview(str(exc), 1000))
+            raise
+        self.report(action, "completed", f"Session {session.id}, compact_count={session.compact_count}",
+                    duration_ms=round((monotonic() - started) * 1000))
+        return action
+
+    def run_tool(self, project, session, block):
+        args = block["input"] if isinstance(block["input"], dict) else {}
+        target = next((str(args[key]) for key in ("command", "path", "pattern", "query") if key in args), "")
+        details = {"tool": block["name"], "tool_call_id": block["id"], "target": preview(target, 500)}
+        started = monotonic()
+        self.report("tool", "running", f"Running {block['name']}", **details)
+        try:
+            result = execute_tool(project, session, block, self.output_limit)
+        except BaseException as exc:
+            self.report("tool", "failed", f"{block['name']} interrupted", **details,
+                        duration_ms=round((monotonic() - started) * 1000), output=preview(str(exc), 1000))
+            raise
+        status = "failed" if result.get("is_error") else "completed"
+        self.report("tool", status, f"{block['name']} {status}", **details,
+                    duration_ms=round((monotonic() - started) * 1000), output=preview(result["content"], 1000))
+        return result
+
+    def run(self, project, session, request=None):
+        self.get_client()
+        if not session.messages:
+            bootstrap_session(project, session)
+        if request:
+            if session.active_request and request != session.active_request:
+                session.active_request += f"\n\nUser follow-up:\n{request}"
+            else:
+                session.active_request = request
+            save_state(project, session)
+            add_message(project, session, "user", request)
+        elif not session.active_request:
+            raise ValueError("No unfinished request to continue")
+        elif session.messages[-1]["role"] == "assistant":
+            add_message(project, session, "user", "Continue the active request; verify existing work first.")
+        recovery_count = 0
+        continuations = 0
+        tool_input_failures = 0
+        while True:
+            self.prepare(project, session)
+            try:
+                response = self.client.messages.create(
+                    model=self.model, system=SYSTEM_PROMPT, messages=session.messages,
+                    tools=TOOLS, max_tokens=self.max_tokens,
+                )
+            except Exception as exc:
+                if not is_context_error(exc) or recovery_count >= 2:
+                    raise
+                self.prepare(project, session, force=True)
+                recovery_count += 1
+                continue
+            recovery_count = 0
+            blocks = [b.model_dump(exclude_none=True) for b in response.content]
+            # An interrupted tool input must not execute or enter model history.
+            if response.stop_reason == "max_tokens" and any(b["type"] == "tool_use" for b in blocks):
+                tool_input_failures += 1
+                add_message(project, session, "user", (
+                    f"Your previous response reached the {self.max_tokens}-token output limit "
+                    "while producing tool calls. That response was discarded; NONE of its "
+                    "tool calls were executed. Continue the active request with a smaller step. "
+                    "Return only ONE small tool call, with minimal explanation. "
+                    f"Keep file content in that call under {min(2000, self.max_tokens)} characters. "
+                    "For a long document, write one section, then use focused edits or "
+                    "small append commands in later calls. Inspect existing files and "
+                    "preserve all previously saved sections. Do not repeat the oversized call."
+                ))
+                save_state(project, session)
+                if tool_input_failures >= 3:
+                    raise RuntimeError(
+                        "Tool call exceeded MAX_TOKENS after 3 attempts; request retained. "
+                        "Continue with smaller file edits, or increase MAX_TOKENS within "
+                        "the model's output limit and restart."
+                    )
+                self.report("tool_input", "retrying", "Retrying tool call with smaller input",
+                            attempt=tool_input_failures + 1, max_tokens=self.max_tokens)
+                continue
+            tool_input_failures = 0
+            add_message(project, session, "assistant", blocks)
+            for block in blocks:
+                if block["type"] == "text":
+                    self.emit(block["text"])
+            calls = [b for b in blocks if b["type"] == "tool_use"]
+            if calls:
+                results = []
+                try:
+                    for block in calls:
+                        results.append(self.run_tool(project, session, block))
+                finally:
+                    # Keep the protocol valid after Ctrl-C or a local storage failure.
+                    for block in calls[len(results):]:
+                        results.append({"type": "tool_result", "tool_use_id": block["id"],
+                                        "is_error": True, "content": "Execution interrupted; inspect files before retrying."})
+                    add_message(project, session, "user", results)
+                    save_state(project, session)
+                continuations = 0
+                continue
+            if response.stop_reason in ("max_tokens", "pause_turn"):
+                continuations += 1
+                add_message(project, session, "user", "Continue the unfinished response without repeating completed work.")
+                if continuations >= 3:
+                    raise RuntimeError("Repeated incomplete responses; use /continue to resume")
+                continue
+            if response.stop_reason == "end_turn":
+                session.active_request = ""
+            save_state(project, session)
+            return

@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f8f9fb" />
+    <meta
+      name="description"
+      content="专为长期编程项目打造的高效工作区。"
+    />
+    <title>Long Code — 工作区</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232c5845'/%3E%3Cpath d='m12 10-6 6 6 6m8-12 6 6-6 6' fill='none' stroke='white' stroke-width='2'/%3E%3C/svg%3E"
+    />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <a class="brand" href="/" aria-label="Long Code 首页"
+          ><span class="brand-mark"><i data-lucide="terminal"></i></span
+          ><span>long code<span class="brand-dot">.</span></span></a
+        >
+        <div class="workspace-label">
+          <span class="workspace-avatar">L</span>
+          <div>本地工作区<small>在你的电脑上，构建你的项目</small></div>
+          <span class="local-dot" title="本地工作区"></span>
+        </div>
+        <div class="sidebar-heading">
+          <span>项目</span><span id="project-count">0</span>
+        </div>
+        <button class="new-project" id="new-project">
+          <i data-lucide="plus"></i> 新建项目 <kbd>N</kbd>
+        </button>
+        <label class="search"
+          ><i data-lucide="search"></i
+          ><input
+            id="project-filter"
+            type="search"
+            placeholder="查找项目…"
+            aria-label="查找项目"
+        /></label>
+        <nav id="projects" aria-label="项目">
+          <p class="sidebar-empty">正在连接工作区…</p>
+        </nav>
+        <div class="sidebar-bottom">
+          <div class="local-note">
+            <i data-lucide="hard-drive"></i
+            ><span
+              >让开发持续推进<small
+                >本地文件，全新上下文。</small
+              ></span
+            >
+          </div>
+          <a id="api-docs" target="_blank" rel="noopener noreferrer"
+            ><i data-lucide="book-open"></i> API 文档
+            <i data-lucide="arrow-up-right"></i
+          ></a>
+          <div class="sidebar-footer">
+            <span class="avatar">我</span
+            ><span>你的工作区<small>个人环境</small></span
+            ><span class="version">v1.0</span>
+          </div>
+        </div>
+      </aside>
+
+      <main class="main-area">
+        <header class="topbar">
+          <div class="breadcrumb">
+            <i data-lucide="panel-left"></i><span>工作区</span
+            ><i data-lucide="chevron-right"></i
+            ><strong id="breadcrumb-project">概览</strong>
+          </div>
+          <div class="connection" id="connection"><span></span> 正在连接</div>
+        </header>
+        <div class="project-header">
+          <div>
+            <div class="eyebrow">你的编程工作区</div>
+            <h1 id="project-title">延续上下文，让开发走得更远。</h1>
+            <p id="project-path">
+              选择一个项目，在每次专注的会话中持续推进开发。
+            </p>
+          </div>
+          <div id="session-badge" class="session-badge" hidden>
+            <i data-lucide="layers-2"></i
+            ><span>会话 <b id="session-number">01</b></span>
+          </div>
+        </div>
+        <div class="workspace-body">
+          <section class="conversation-panel" aria-label="对话">
+            <div class="panel-tabs">
+              <button class="panel-tab active">
+                <i data-lucide="messages-square"></i> 对话</button
+              ><span class="workspace-hint"
+                ><span></span> 以文件内容为准</span
+              >
+            </div>
+            <div id="notice" class="notice" role="alert" hidden></div>
+            <div
+              id="conversation"
+              class="conversation"
+              role="log"
+              aria-label="对话消息"
+              aria-live="polite"
+            >
+              <div id="welcome" class="welcome">
+                <div class="welcome-symbol">
+                  <i data-lucide="code-xml"></i
+                  ><span class="symbol-spark">+</span>
+                </div>
+                <span class="welcome-label"
+                  >留出思考空间，专注动手构建。</span
+                >
+                <h2 id="welcome-title">
+                  出色的成果，<br />始于清晰的下一步。
+                </h2>
+                <p id="welcome-description">
+                  接入代码仓库，描述下一步目标。<br />Long Code 持续推进工作，让上下文保持清晰。
+                </p>
+                <div class="suggestions">
+                  <button
+                    data-prompt="请检查这个项目，并说明它的架构。"
+                  >
+                    <i data-lucide="scan-search"></i
+                    ><span
+                      >探索代码库<small
+                        >了解各个模块如何协作</small
+                      ></span
+                    ><i data-lucide="arrow-up-right"></i></button
+                  ><button
+                    data-prompt="请审查这个项目，找出一个可以着手解决的缺陷，并提出有针对性的修复方案。"
+                  >
+                    <i data-lucide="bug"></i
+                    ><span
+                      >定位并修复问题<small
+                        >将问题转化为明确的下一步</small
+                      ></span
+                    ><i data-lucide="arrow-up-right"></i></button
+                  ><button
+                    data-prompt="请审查现有测试，找出最需要补充的测试覆盖。"
+                  >
+                    <i data-lucide="flask-conical"></i
+                    ><span
+                      >完善测试<small
+                        >为后续开发提供可靠保障</small
+                      ></span
+                    ><i data-lucide="arrow-up-right"></i>
+                  </button>
+                </div>
+              </div>
+              <div id="messages"></div>
+              <div id="working" class="working" hidden>
+                <span class="working-dots"><b></b><b></b><b></b></span
+                ><span id="working-label">助手正在处理…</span>
+              </div>
+            </div>
+            <div class="composer-area">
+              <button id="continue" class="continue-button" hidden>
+                <i data-lucide="play"></i> 继续未完成的请求
+              </button>
+              <form id="chat-form" class="composer">
+                <textarea
+                  id="message"
+                  rows="2"
+                  placeholder="选择一个项目，开始对话…"
+                  aria-label="消息"
+                  disabled
+                ></textarea>
+                <div class="composer-toolbar">
+                  <div class="composer-context">
+                    <i data-lucide="folder-code"></i
+                    ><span id="composer-project">尚未选择项目</span>
+                  </div>
+                  <button
+                    id="send"
+                    type="submit"
+                    class="send-button"
+                    aria-label="发送消息"
+                    disabled
+                  >
+                    <i data-lucide="arrow-up"></i>
+                  </button>
+                </div>
+              </form>
+              <div class="composer-footer">
+                <span
+                  ><span class="small-dot"></span>
+                  <span id="model-name">本地助手</span></span
+                ><span
+                  ><kbd>Enter</kbd> 发送 · <kbd>Shift ↵</kbd> 换行</span
+                >
+              </div>
+            </div>
+          </section>
+
+          <aside class="context-panel">
+            <div class="context-heading">
+              <i data-lucide="sliders-horizontal"></i
+              ><span>会话上下文</span>
+            </div>
+            <div class="context-card">
+              <div class="card-label">
+                当前会话
+                <span id="run-status" class="status-chip">就绪</span>
+              </div>
+              <div class="session-value" id="context-session">
+                —<small>随时可以开始</small>
+              </div>
+              <div class="context-meter-label">
+                <span>上下文用量</span
+                ><strong id="context-percent">0%</strong>
+              </div>
+              <div class="meter"><span id="context-meter"></span></div>
+              <p id="context-tokens" class="microcopy" title="词元数按每 4 个字符约 1 个词元估算，实际用量取决于模型和文本。">
+                为下一个想法留出全新空间。
+              </p>
+              <div class="compaction">
+                <span>轻量压缩次数</span
+                ><strong id="compact-count">0 <span>/ 1</span></strong>
+              </div>
+              <div class="lifecycle">
+                <span class="lifecycle-step active"></span><i></i
+                ><span class="lifecycle-step"></span><i></i
+                ><span class="lifecycle-step"></span>
+              </div>
+              <div class="lifecycle-labels">
+                <span>执行</span><span>压缩</span><span>交接</span>
+              </div>
+            </div>
+            <div class="context-section">
+              <div class="section-label">
+                工作计划 <span id="todo-count">0</span>
+              </div>
+              <div id="todos" class="todo-list">
+                <p class="context-empty">
+                  助手开始工作后，后续步骤会显示在这里。
+                </p>
+              </div>
+            </div>
+            <div class="context-section">
+              <div class="section-label">项目知识</div>
+              <button class="document-button" data-document="project">
+                <i data-lucide="file-text"></i
+                ><span
+                  >项目概述<small
+                    >长期目标与需求</small
+                  ></span
+                ><i data-lucide="chevron-right"></i></button
+              ><button class="document-button" data-document="handoff">
+                <i data-lucide="arrow-right-left"></i
+                ><span
+                  >会话交接<small
+                    >查看上次会话的进展</small
+                  ></span
+                ><i data-lucide="chevron-right"></i></button
+              ><button class="document-button" id="history-button">
+                <i data-lucide="history"></i
+                ><span>搜索历史<small>查找以往的决策</small></span
+                ><i data-lucide="chevron-right"></i>
+              </button>
+            </div>
+            <div class="context-tip">
+              <i data-lucide="sprout"></i>
+              <h3>更新上下文，持续推进工作。</h3>
+              <p>
+                每次会话压缩一次上下文，随后完成交接，重新查看文件并继续下一步。
+              </p>
+            </div>
+          </aside>
+        </div>
+      </main>
+    </div>
+
+    <dialog id="project-dialog">
+      <form id="project-form">
+        <div class="dialog-heading">
+          <div>
+            <span class="eyebrow">为下一步做好准备</span>
+            <h2>接入项目</h2>
+          </div>
+          <button
+            type="button"
+            class="icon-button"
+            data-close
+            aria-label="关闭对话框"
+          >
+            <i data-lucide="x"></i>
+          </button>
+        </div>
+        <p class="dialog-description">
+          将 Long Code 连接到本机上已有的项目文件夹。
+        </p>
+        <label class="field-label" for="project-name">项目名称</label
+        ><input
+          id="project-name"
+          name="name"
+          placeholder="例如：my-project"
+          maxlength="100"
+          required
+        /><label class="field-label" for="project-root">代码仓库路径</label
+        ><input
+          id="project-root"
+          name="root"
+          placeholder="/home/you/code/my-project"
+          required
+        />
+        <p class="field-help">
+          请输入绝对路径或以 ~/ 开头的路径。
+        </p>
+        <p id="project-error" class="form-error" role="alert" hidden></p>
+        <div class="dialog-actions">
+          <button type="button" class="secondary-button" data-close>
+            取消</button
+          ><button type="submit" class="primary-button">
+            接入项目 <i data-lucide="arrow-right"></i>
+          </button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="document-dialog" class="wide-dialog">
+      <div class="dialog-heading">
+        <h2 id="document-title">项目概述</h2>
+        <button
+          type="button"
+          class="icon-button"
+          data-close
+          aria-label="关闭对话框"
+        >
+          <i data-lucide="x"></i>
+        </button>
+      </div>
+      <div id="document-content" class="markdown document-content"></div>
+    </dialog>
+    <dialog id="history-dialog" class="wide-dialog">
+      <div class="dialog-heading">
+        <h2>搜索项目历史</h2>
+        <button
+          type="button"
+          class="icon-button"
+          data-close
+          aria-label="关闭对话框"
+        >
+          <i data-lucide="x"></i>
+        </button>
+      </div>
+      <p class="dialog-description">
+        搜索所选项目的交接记录和对话记录。
+      </p>
+      <form id="history-form" class="history-form">
+        <input
+          id="history-query"
+          aria-label="搜索关键词"
+          placeholder="输入决策、文件名或想法…"
+          required
+        /><button type="submit" class="primary-button">搜索</button>
+      </form>
+      <pre id="history-results" class="history-results">
+搜索即可查找项目以往的决策。</pre>
+    </dialog>
+    <script type="module" src="/src/app.js"></script>
+  </body>
+</html>
