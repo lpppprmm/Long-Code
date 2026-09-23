@@ -278,44 +278,11 @@ If the core architecture later proves effective, add these gradually.
 
 ------
 
-# 4. Relationship to the Existing Code
+# 4. Session Lifecycle
 
-The current Integrated Harness already contains:
-
-- Transcript saving
-- History Summary
-- Compact
-- Reactive Compact
-- Tool result budget
-- Task system
-- Worktree
-- Memory
-- Team
-- Background task
-- Cron
-- MCP
-
-Some of these mechanisms are worth keeping as ideas, but their implementation needs to be greatly simplified.
-
-The current `compact_history()` does the following:
-
-1. Save the transcript
-2. Call the model to summarize the history
-3. Put the summary back into `messages`
-
-So after compaction it is still the same logical Session.
-
-The new project should change the second compact from:
-
-```text
-compact again
-```
-
-into:
-
-```text
-handoff + new session
-```
+A session may compact its history once. When the context reaches the limit again,
+the agent writes a handoff and starts a new session. The new session inspects the
+project and continues the active request using that handoff.
 
 ------
 
