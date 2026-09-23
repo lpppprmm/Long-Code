@@ -1,290 +1,232 @@
-# Long Code — Simple Coding Agent
+# Long Code
 
-A synchronous, project-scoped coding agent implementing the [V1 technical design](long-code%20text.en.md).
-Each session may compact its context once. The next compaction creates a factual
-handoff and a fresh session, which inspects the repository before continuing.
+Long Code is a local coding agent for working in existing project directories. It runs from
+a terminal or a browser, uses an Anthropic-compatible Messages API, and keeps project state
+across interrupted requests and long sessions.
 
-For the browser interface, follow [Web workspace](#web-workspace). For CLI mode,
-follow the instructions below.
+- **One project at a time:** chat, file tools, and history stay scoped to the selected
+  directory.
+- **Recoverable sessions:** context compaction, handoffs, checkpoints, and `/continue` keep
+  unfinished work available after an error or restart.
+- **Local web workspace:** chat, tool activity, todos, project documents, history search,
+  and a session timeline.
+- **Predictable tools:** a fixed tool set for shell commands, file operations, todos, and
+  history search.
 
-## Run
+The implementation follows the [V1 technical design](long-code%20text.en.md). The web
+interface and CLI share the same project registry and session lifecycle.
 
-Requires Python 3.10+, Bash, a POSIX system (Linux or macOS), and an
-Anthropic-compatible Messages API. Git enables
-repository inspection but is not required for non-Git projects.
+## Requirements
+
+- Python 3.10+, Bash, and Linux or macOS
+- An Anthropic-compatible Messages API and a model ID for chat
+- Node.js 20.19+ or 22.12+ for the web interface
+- Git for repository inspection (optional for projects without a Git repository)
+
+Project management and the automated tests work without an API key. Model calls require
+`ANTHROPIC_API_KEY` and `MODEL_ID`.
+
+## Quick start: CLI
+
+Clone the repository and install the Python dependencies:
 
 ```sh
+git clone https://github.com/lpppprmm/Long-Code.git long-code
+cd long-code
 python3 -m venv .venv
-. .venv/bin/activate
-pip install -r requirements.txt
+.venv/bin/python -m pip install -r requirements.txt
 [ -f .env ] || cp .env.example .env
-# Set ANTHROPIC_API_KEY and MODEL_ID in .env.
-python main.py
 ```
 
-The environment lives in the project-local, git-ignored `.venv/`. Without
-activating it, call the interpreter directly (`.venv/bin/python main.py`).
-`pip install -r requirements-dev.txt` adds the lint tooling used below on top of
-the runtime dependencies.
+Set `ANTHROPIC_API_KEY` and `MODEL_ID` in the root `.env` file. Set `ANTHROPIC_BASE_URL` if
+your provider uses a compatible endpoint. Then start the CLI:
 
-`python code.py` remains an equivalent entry point. Project management works
-without credentials; model calls require the API configuration. Environment
-variables take precedence over `.env` in this application's directory.
+```sh
+.venv/bin/python main.py
+```
+
+`.venv/bin/python code.py` is an equivalent entry point. Environment variables take precedence
+over values in `.env`.
+
+The directory you register must already exist. For example:
 
 ```text
-> new my-project ~/code/my-project
-my-project [1] > Implement the parser and run its tests.
-my-project [1] > /current
-my-project [1] > /back
+> new demo ~/code/existing-project
+demo [1] > Find the failing parser test and fix it.
+demo [1] > /current
+demo [1] > /back
 > list
-> open my-project
-my-project [1] > /continue
-my-project [1] > /exit
+> open demo
+demo [1] > /exit
 ```
 
-The repository directory must already exist. Quote names or paths containing
-spaces. IDs are generated from names, for example `"My Project"` → `my-project`.
-Names without Latin letters or digits receive a generated `project-...` ID.
-Use `/project open <id>` to switch directly, `/project list` to list projects,
-and `/help` for commands. Plain text inside a project is sent to the agent.
-`/continue` resumes the saved unfinished request after an error or restart.
-Ctrl-C interrupts the current action and returns to the prompt; EOF exits.
+| Command | Purpose |
+| --- | --- |
+| `new <name> <path>` | Register and open an existing directory |
+| `list`, `open <id>` | List or reopen registered projects |
+| `/current`, `/back` | Show the selected project or return to project selection |
+| `/continue` | Resume an unfinished request after an error, interruption, or restart |
+| `/project <command>` | Run a project command without leaving the current project |
+| `/help`, `/exit` | Show help or quit |
+
+Quote names or paths containing spaces. IDs are derived from names; names without Latin
+letters or digits receive a generated `project-...` ID. Plain text inside an open project
+goes to the agent. Ctrl-C interrupts the current action and returns to the prompt; EOF
+exits.
 
 ## Web workspace
 
-The web interface runs as a separate Vite frontend and FastAPI backend. It reuses
-the CLI's project registry, tools, and session lifecycle. Requires Node.js 20.19+
-or 22.12+ in addition to the Python environment above.
-
-Keep the backend and frontend running in **two separate terminals**. The commands
-below assume the checkout is at `/home/lpxbtt/code/long-code`; adjust the path if
-you cloned it elsewhere.
-
-For first-time setup, create the Python environment and install dependencies:
+Install the frontend dependencies in addition to the Python setup above:
 
 ```sh
-cd /home/lpxbtt/code/long-code
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-[ -f .env ] || cp .env.example .env
 npm --prefix frontend ci
 ```
 
-Set `ANTHROPIC_API_KEY` and `MODEL_ID` in the root `.env`. Set
-`ANTHROPIC_BASE_URL` if you use a compatible provider. Skip the setup commands
-when the environment and dependencies are already installed.
-
-**Terminal 1 — start FastAPI:**
+Start the backend and frontend in **separate terminals**, both from the repository root:
 
 ```sh
-cd /home/lpxbtt/code/long-code
+# Terminal 1: API
 .venv/bin/python -m uvicorn api:app --host 127.0.0.1 --port 8000
 ```
 
-**Terminal 2 — start the frontend:**
-
 ```sh
-cd /home/lpxbtt/code/long-code/frontend
-npm run dev
+# Terminal 2: browser client
+npm --prefix frontend run dev
 ```
 
-Open [http://127.0.0.1:5173](http://127.0.0.1:5173) for the web interface.
-The API's interactive documentation is at
-[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs).
+Open [http://127.0.0.1:5173](http://127.0.0.1:5173). API documentation is available at
+[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs). Port 8000 serves API routes, so a
+404 at its root URL is expected.
 
-**A `404 Not Found` at `http://127.0.0.1:8000/` is expected.** Port 8000 serves
-API routes, not the frontend; `/` and `/favicon.ico` are not defined there. Use
-port 5173 to open the page.
+The workspace supports project creation and switching, chat, live tool activity, context
+usage, todos, editable project requirements, history search, and archived session details.
+Responses render as sanitized Markdown. Tool activity shows its target, status, elapsed
+time, and an expandable result preview; compaction and handoff progress also appear while a
+request runs.
 
-If startup reports that port 8000 or 5173 is already in use, reuse the running
-service or stop it with `Ctrl-C` in its terminal before restarting. You can inspect
-the listener with `lsof -i :8000` or `lsof -i :5173`. Stop both services with
-`Ctrl-C` in their respective terminals when finished.
+Use **停止任务** to interrupt the next agent step or an active shell command. The unfinished
+request remains available through **继续未完成的请求**. A model API call already in flight finishes
+before cancellation takes effect. Closing the browser does not cancel an accepted run;
+reopening it reconnects to the current workspace.
 
-The frontend offers project
-creation and switching, chat, progress updates, context usage, todos, project
-documents, history search, a session timeline, and continuation of unfinished requests. Responses
-render as sanitized Markdown. The page polls for progress while a chat request
-runs, so tool activity and session transitions appear before the request finishes.
-Use **停止任务** during a run to stop the next agent step or an active Bash command.
-The unfinished request remains available through **继续未完成的请求**. A model API
-call already in flight finishes before cancellation takes effect.
-Tool activity includes the command or file target, running/completed/failed status,
-elapsed time, and an expandable result preview. Compaction and handoff phases are
-shown while they run, including summary retries.
+The backend allows one active run at a time and rejects project changes or another chat
+request while busy. It has no login and can run shell commands with your user permissions,
+so keep it bound to loopback and run only one backend worker.
 
-The backend permits one active run at a time and rejects project changes or a
-second chat while busy. Closing the browser does not cancel an accepted run;
-reopening reconnects to the current workspace. Recent web conversation events
-are stored in each project's `web-events.jsonl` independently of model context.
-Opening another project loads only that project's events. A server restart
-requires selecting the project again; its unfinished request can then be resumed.
-The event log keeps recent activity and is compacted when it exceeds 4 MiB.
+To use a different API address, copy `frontend/.env.example` to `frontend/.env.local` and
+set `VITE_API_URL` before starting or building the frontend. Set `FRONTEND_ORIGINS` on the
+backend to allow the frontend origin; the default allows `http://localhost:5173` and
+`http://127.0.0.1:5173`.
 
-The data home uses a process lock: another CLI or API process using the same home
-exits with an error until the first process stops. Run one backend worker. This is
-a local, single-user interface with no login: keep the backend
-bound to loopback. It can execute shell commands with your user permissions.
+## Projects, sessions, and recovery
 
-The frontend defaults to `http://127.0.0.1:8000`. To change it, copy
-`frontend/.env.example` to `frontend/.env.local` and set `VITE_API_URL` before
-starting or building Vite. The backend's `FRONTEND_ORIGINS` is a comma-separated
-allowlist, defaulting to `http://localhost:5173,http://127.0.0.1:5173`.
+The default data home is `~/.simple-agent`. It contains `projects.json` and one directory
+per registered project:
 
-```sh
-cd frontend
-npm run build       # Static frontend output: frontend/dist/
-npm run preview     # Preview the build on port 5173; backend runs separately
-npx playwright install chromium
-npm test           # Browser tests use mocked API responses, no model calls
-```
+| Path inside `projects/<id>/` | Contents |
+| --- | --- |
+| `PROJECT.md` | Long-term goals, constraints, and decisions you can edit |
+| `state.json` | Current session number, request, compaction count, and todos |
+| `HANDOFF.md` and `handoffs/` | Latest and archived working handoffs |
+| `checkpoints/` | Request, unfinished todos, recent commands, Git state, file hashes, and token totals |
+| `transcripts/` | Append-only messages and compaction events |
+| `tool-results/` | Full outputs that exceed the context preview limit |
+| `web-events.jsonl` | Recent browser conversation events, separate from model context |
 
-The API exposes `GET /api/projects`, `POST /api/projects`,
-`POST /api/projects/{id}/open`, `GET /api/state`, `POST /api/chat`,
-`POST /api/chat/cancel`,
-`GET /api/projects/{id}/history?query=...`, and the session list/detail routes
-under `GET /api/projects/{id}/sessions`. Chat requires `project_id` and a
-`message`; omit `message` to continue the current unfinished request. API keys
-stay in the backend environment and are never sent to the browser.
+Keep stable project requirements in `PROJECT.md` and temporary progress in the handoff. A
+fresh session inspects the project directory, Git state, relevant files, persistent
+requirements, and any handoff before continuing.
 
-## State and recovery
+When the context budget is reached, the first transition compacts the current session while
+retaining recent complete tool exchanges. The next transition writes a factual handoff,
+archives it, and starts a fresh session. Unfinished todos carry forward. On reopening, the
+agent inspects the files again and compares them with its checkpoint; it does not replay old
+transcripts. The browser's session timeline shows archived handoffs and paged transcript
+records. `search_history` retrieves older details.
 
-By default, the registry lives at `~/.simple-agent/projects.json`. Each registered
-project has its own directory under `~/.simple-agent/projects/<id>/`:
+State and project file writes use atomic replacement. If a run stops after making changes,
+inspect the files before continuing: an interrupted shell command may have left partial
+results. A crash just after a model response may leave its request marked unfinished even
+though the work was completed.
 
-- `PROJECT.md`: user-maintained long-term goals, constraints, and design decisions.
-- `state.json`: program-owned session number, compaction count, request, and todos.
-- `HANDOFF.md` and `handoffs/session_NNN.md`: latest and archived working handoffs.
-- `checkpoints/session_NNN.json`: program-recorded request, unfinished todos,
-  recent command outcomes, Git state, relevant file hashes, and token totals.
-- `transcripts/session_NNN.jsonl`: append-only messages and compaction events.
-- `tool-results/`: outputs too large to include in model context.
+## Configuration
 
-Edit the generated `PROJECT.md` to record stable project requirements. Temporary
-progress belongs in the handoff. Every fresh context includes directory inspection,
-Git status, staged/unstaged diff statistics, key-file previews, persistent rules,
-the handoff, and the active request. Files and tests outrank the handoff.
+The root `.env` is loaded by the CLI and backend. Process environment variables override it.
 
-The first compaction preserves a small suffix of complete tool exchanges and a
-summary; it never overwrites the original transcript. The next compaction archives
-the handoff, advances the session, clears messages, and bootstraps automatically.
-Unfinished todos are recorded verbatim in the handoff and carried into the new
-session's structured todo list. Rollover continues the same
-request without user intervention. Reopening restores the session counter and
-compaction count, then inspects the repository and compares the checkpoint's Git
-state and recorded file hashes without replaying transcripts. The comparison
-result is written to the new session's transcript.
-Historical details can be retrieved with `search_history`.
-The session badge in the browser opens archived handoffs and paged transcript
-records, including for projects created before checkpoints were introduced.
-
-State, registry, handoffs, and project file writes use atomic replacement. A failed
-project registration removes its newly created data directory. Messages are flushed to the
-transcript as they arrive. If execution is interrupted, an external command may
-have made partial changes; the agent is instructed to inspect before retrying.
-A crash immediately after the model's final response may leave the request marked
-unfinished, so recovery should verify the files before doing more work.
-
-## Tools and configuration
-
-The static tool set is `bash`, `read_file`, `write_file`, `edit_file`, `glob`,
-`todo_write`, and `search_history`. File writes and edits reject paths outside
-the repository, including symlink escapes, except for the explicit
-`agent://PROJECT.md` path for persistent requirements. Both `write_file` and
-`edit_file` support that path. Other agent data, including state, handoffs, and
-transcripts, is read-only through file tools. `read_file` accepts `agent://...`
-for this project's data and saved outputs. Each read is limited to 1,000 lines
-and 100,000 characters, with a maximum starting offset of 100,000 lines. History
-search scans at most 32 MiB per request and reports when it stops early; it never
-searches another project. Bash uses the project root as its working directory;
-it **is not a security sandbox** and executes with the CLI user's permissions.
-Commands run synchronously with a default 120-second timeout (maximum 600 seconds).
-Bash output is capped at 10 MiB; a command exceeding that limit is stopped and
-returns an error with its captured output available in `tool-results/`.
-Use one CLI process or one API worker per data home.
-Bootstrap identifies the Git root and whether it belongs to the selected project
-or an ancestor directory. The agent is instructed to initialize repositories and
-create commits only when requested by the user or project requirements.
-
-| Setting | Default | Meaning |
+| Variable | Default | Purpose |
 | --- | --- | --- |
-| `ANTHROPIC_API_KEY` | required for chat | API credential |
-| `MODEL_ID` | required for chat | Model available on your endpoint |
+| `ANTHROPIC_API_KEY` | Required for chat | API credential |
+| `MODEL_ID` | Required for chat | Model available at the configured endpoint |
 | `ANTHROPIC_BASE_URL` | SDK default | Optional compatible Messages API endpoint |
 | `SIMPLE_AGENT_HOME` | `~/.simple-agent` | Registry and project data |
 | `CONTEXT_LIMIT_TOKENS` | `100000` | Estimated token budget before compaction; minimum 500 |
-| `CONTEXT_LIMIT` | `400000` | Legacy character budget; used only when `CONTEXT_LIMIT_TOKENS` is unset; minimum 2000 |
-| `MAX_TOOL_OUTPUT` | `10000` | Tool-result preview limit; minimum 500, capped at one quarter of context |
-| `MAX_TOKENS` | `8000` | Output token limit per coding model call |
-| `SUMMARY_MAX_TOKENS` | `4000` | Maximum output tokens per summary/handoff attempt; independent of `MAX_TOKENS`, minimum 1 |
+| `CONTEXT_LIMIT` | `400000` | Legacy character budget, used only when the token setting is absent |
+| `MAX_TOOL_OUTPUT` | `10000` | Tool-result preview size; minimum 500 |
+| `MAX_TOKENS` | `8000` | Maximum output tokens for a coding model call |
+| `SUMMARY_MAX_TOKENS` | `4000` | Maximum output tokens for a summary or handoff attempt |
+| `FRONTEND_ORIGINS` | Local Vite origins | Comma-separated browser origin allowlist |
 
-For the demo, the context budget defaults to **100,000 estimated tokens**. Set
-`CONTEXT_LIMIT_TOKENS=100000` in the root `.env`, then restart the backend or CLI
-to apply it. A smaller value, such as `20000`, demonstrates compaction and
-rollover sooner. The first threshold crossing compacts the session; the next
-creates a handoff and a fresh session.
+The CLI's `--data-home PATH` overrides `SIMPLE_AGENT_HOME`. Restart the CLI or backend after
+changing configuration.
 
-The frontend displays estimated tokens using four characters per token and, after
-a model response, its actual input-token count. Before any measured usage is
-available, the runtime uses the character estimate. After a response, it projects
-the next input size from the measured token count plus new message characters,
-reserving space for output. This projection is still approximate because message
-content and model overhead change. The token setting takes
-precedence over the legacy character setting. `MAX_TOKENS` controls response
-length independently.
+The browser shows a four-characters-per-token estimate and, after a model response, the
+measured input-token count. The runtime uses measured usage to project the next input size,
+but the projection remains approximate. Set a smaller `CONTEXT_LIMIT_TOKENS` value, such as
+`20000`, to observe compaction and rollover sooner.
 
-Summaries start with up to 2,000 output tokens. A truncated summary is retried with
-a shorter requested answer and up to 4,000 output tokens; the final attempt uses
-the full `SUMMARY_MAX_TOKENS` budget. Every attempt is capped by that setting.
-There are at most three attempts, including context-error
-retries. Failed summaries leave the existing session and checkpoint intact.
-If retries are exhausted, raise `SUMMARY_MAX_TOKENS` in `.env`, restart the
-backend or CLI, and continue the unfinished request.
+Summaries begin with a small output budget and retry with shorter input or a larger output
+budget when necessary, up to three attempts within `SUMMARY_MAX_TOKENS`. Failed attempts
+preserve the active session and checkpoint. If retries are exhausted, raise that limit and
+continue the unfinished request.
 
-`--data-home PATH` overrides `SIMPLE_AGENT_HOME`. The official
-[Anthropic Python SDK](https://github.com/anthropics/anthropic-sdk-python) supplies
-API transport and transient-error retries. Bracketed IPv6 entries such as `[::1]`
-are hidden from `no_proxy` only while the client is constructed, because the SDK's
-HTTP layer rejects them; the rest of the process environment is left unchanged.
-Context-length errors follow the same
-compact-then-rollover policy, with bounded recovery attempts. Truncated text
-responses continue automatically; incomplete tool inputs are never executed.
-When a response containing tool calls reaches `MAX_TOKENS`, the entire response is
-discarded and the agent receives explicit instructions to retry with one small tool
-call and incremental file edits. It retries automatically up to twice, without
-raising the output budget or forcing compaction. Three consecutive truncated tool
-responses stop the run with the active request preserved; completed tool calls reset
-this retry count. The context threshold still controls compaction and rollover.
+## Tools and boundaries
 
-The core has four modules: `main.py` (CLI), `agent.py` (model loop),
-`session.py` (project state and lifecycle), and `tools.py` (tools). `api.py` is a
-thin HTTP adapter and `frontend/` is an independently built browser client.
-FastAPI runs synchronous agent requests on its request thread pool; there is no
-separate job queue, scheduler, team, worktree, memory runtime, or dynamic tool set.
+The agent's fixed tool set is `bash`, `read_file`, `write_file`, `edit_file`, `glob`,
+`todo_write`, and `search_history`. File writes stay inside the selected project, including
+checks against symlink escapes. The explicit `agent://PROJECT.md` path allows edits to
+persistent requirements; other agent data is read-only through file tools.
 
-## Verify
+`read_file` can inspect project data and saved outputs through `agent://...`. A read is
+limited to 1,000 lines and 100,000 characters; history search scans at most 32 MiB per
+request and stays within the selected project. Shell commands start in the project root, run
+with a 120-second default timeout (600-second maximum), and stop if output exceeds 10 MiB.
+**Shell execution is not a security sandbox.**
+
+Only one CLI process or API worker can use a data home at a time. Git inspection identifies
+whether a repository is inside the selected project or in an ancestor directory. The agent
+is instructed to initialize repositories and create commits only when requested.
+
+The Anthropic Python SDK handles API transport and transient-error retries. Context-length
+errors trigger bounded compaction or rollover recovery. Truncated text responses continue
+automatically; incomplete tool inputs are never executed. Repeated truncated tool responses
+stop the run with its request preserved for `/continue`.
+
+## Development and verification
+
+Install the development dependencies, then run the Python tests and lint:
 
 ```sh
+.venv/bin/python -m pip install -r requirements-dev.txt
 .venv/bin/python -m unittest discover -s tests -v
 .venv/bin/python -m ruff check .
 ```
 
-Tests use temporary repositories and deterministic model responses, require no
-API key, and cover the documented lifecycle, repeated rollovers, project isolation,
-restart and failure recovery, file boundaries, tool errors, and output persistence.
-With dependencies installed, an additional test exercises the real SDK against
-an in-memory HTTP transport; no live API request is made.
-
-Run the complete browser-to-backend rollover demonstration with:
+Build and test the frontend:
 
 ```sh
-npm --prefix frontend run test:integration
+npm --prefix frontend run build
+cd frontend
+npx playwright install chromium
+npm test
+npm run test:integration
 ```
 
-This uses the existing Playwright browser installation, a real FastAPI backend,
-the real agent and file tools, and a deterministic offline model. It recovers a
-truncated summary, compacts and rolls over twice, and checks Session 3, retained
-requirements, saved handoffs, execution details, and lifecycle phases in the UI.
-The test starts isolated servers on ports 8765 and 5174 and cleans up its temporary
-project. Its 4,000-token demo threshold does not change the normal 100,000-token
-configuration. No API key or paid model calls are needed.
+The Python and browser tests use deterministic responses and make no paid model calls. The
+browser tests mock API responses. The integration test starts a real FastAPI backend with an
+offline model on ports 8765 and 5174, then exercises compaction, two rollovers, and recovery
+in the UI. It uses an isolated 4,000-token demo budget; normal configuration is unchanged.
+
+The core modules are `main.py` (CLI), `agent.py` (model loop), `session.py` (project state
+and lifecycle), and `tools.py` (tools). `api.py` provides the HTTP adapter, and `frontend/`
+is the browser client. The backend exposes project selection, state, chat and cancellation,
+history search, and session list/detail routes under `/api/`.
