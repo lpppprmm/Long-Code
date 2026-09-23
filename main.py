@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Command-line project selection and chat."""
 
 import argparse
