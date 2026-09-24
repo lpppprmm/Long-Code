@@ -1,10 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="440" viewBox="0 0 1280 440" fill="none" role="img" aria-labelledby="title desc">
-  <title id="title">How Long Code carries work across context windows</title>
-  <desc id="desc">Work in a session, compact once, then write a handoff and checkpoint when the context budget is reached again. A fresh session inspects files and continues. Independent task records and original evidence persist throughout.</desc>
+  <title id="title">Long Code 如何在不同上下文窗口之间接续任务</title>
+  <desc id="desc">执行任务，压缩一次上下文，再次达到预算时保存交接文档和检查点。新会话检查文件后继续执行，独立任务记录和原始证据始终保留。</desc>
   <rect x="1" y="1" width="1278" height="438" rx="20" fill="#FAFBF8" stroke="#E0E6DB"/>
-  <g font-family="Inter, 'Segoe UI', Arial, sans-serif">
-    <text x="40" y="45" fill="#345B46" font-size="12" font-weight="700" letter-spacing="2">THE SESSION LIFECYCLE</text>
-    <text x="40" y="80" fill="#273D2F" font-size="25" font-weight="600">A fresh window, with the work still in reach.</text>
+  <g font-family="Inter, 'Segoe UI', Arial, 'Noto Sans CJK SC', 'Microsoft YaHei', 'PingFang SC', sans-serif">
+    <text x="40" y="45" fill="#345B46" font-size="12" font-weight="700" letter-spacing="2">会话生命周期</text>
+    <text x="40" y="80" fill="#273D2F" font-size="25" font-weight="600">换个窗口，接着完成同一个任务。</text>
     <g stroke="#DCE5D6" fill="#FFF">
       <rect x="40" y="113" width="264" height="155" rx="13"/>
       <rect x="352" y="113" width="264" height="155" rx="13"/>
@@ -12,37 +12,37 @@
     </g>
     <rect x="976" y="113" width="264" height="155" rx="13" fill="#345B46"/>
     <g font-size="12" font-weight="700" letter-spacing="1.4">
-      <text x="62" y="144" fill="#7C936F">01 / WORK</text>
-      <text x="374" y="144" fill="#7C936F">02 / COMPACT ONCE</text>
-      <text x="686" y="144" fill="#7C936F">03 / HAND OFF</text>
-      <text x="998" y="144" fill="#C0D6B3">04 / CONTINUE</text>
+      <text x="62" y="144" fill="#7C936F">01 / 执行</text>
+      <text x="374" y="144" fill="#7C936F">02 / 压缩一次</text>
+      <text x="686" y="144" fill="#7C936F">03 / 交接</text>
+      <text x="998" y="144" fill="#C0D6B3">04 / 接续</text>
     </g>
     <g font-size="20" font-weight="600" fill="#30482F">
-      <text x="62" y="180">Inspect &amp; execute</text>
-      <text x="374" y="180">Keep essentials</text>
-      <text x="686" y="180">Write a checkpoint</text>
-      <text x="998" y="180" fill="#FFF">Reinspect &amp; resume</text>
+      <text x="62" y="180">检查并执行</text>
+      <text x="374" y="180">保留关键上下文</text>
+      <text x="686" y="180">保存交接与检查点</text>
+      <text x="998" y="180" fill="#FFF">重新核实，继续开发</text>
     </g>
     <g font-size="15" fill="#74816D">
-      <text x="62" y="212">Read files, run tools, and</text><text x="62" y="235">record meaningful progress.</text>
-      <text x="374" y="212">At the first context limit,</text><text x="374" y="235">summarize and keep working.</text>
-      <text x="686" y="212">At the next limit, archive</text><text x="686" y="235">a handoff and program state.</text>
-      <text x="998" y="212" fill="#D1DECB">Reinspect files and evidence,</text><text x="998" y="235" fill="#D1DECB">then take the next action.</text>
+      <text x="62" y="212">读取文件、调用工具，</text><text x="62" y="235">记录有意义的进展。</text>
+      <text x="374" y="212">首次达到上下文阈值时，</text><text x="374" y="235">生成摘要并继续工作。</text>
+      <text x="686" y="212">再次达到阈值时，</text><text x="686" y="235">归档交接文档与运行状态。</text>
+      <text x="998" y="212" fill="#D1DECB">检查文件并核对执行证据，</text><text x="998" y="235" fill="#D1DECB">然后执行明确的下一步。</text>
     </g>
     <g stroke="#87A277" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
       <path d="M318 191h20m-6-6 6 6-6 6"/><path d="M630 191h20m-6-6 6 6-6 6"/><path d="M942 191h20m-6-6 6 6-6 6"/>
     </g>
     <g stroke="#ACBFA2" stroke-dasharray="4 5"><path d="M172 269v34"/><path d="M484 269v34"/><path d="M796 269v34"/><path d="M1108 269v34"/></g>
     <rect x="40" y="304" width="1200" height="95" rx="13" fill="#EDF3E7" stroke="#DCE5D6"/>
-    <text x="62" y="336" fill="#3D6138" font-size="12" font-weight="700" letter-spacing="1.4">PERSISTENT PROJECT &amp; TASK RECORDS</text>
-    <text x="62" y="370" fill="#53704A" font-size="16">Original requests</text>
-    <circle cx="244" cy="364" r="2.5" fill="#8EA880"/>
-    <text x="269" y="370" fill="#53704A" font-size="16">Effective constraints</text>
-    <circle cx="472" cy="364" r="2.5" fill="#8EA880"/>
-    <text x="497" y="370" fill="#53704A" font-size="16">Tool evidence</text>
-    <circle cx="651" cy="364" r="2.5" fill="#8EA880"/>
-    <text x="676" y="370" fill="#53704A" font-size="16">Decisions &amp; failed attempts</text>
-    <circle cx="924" cy="364" r="2.5" fill="#8EA880"/>
-    <text x="949" y="370" fill="#53704A" font-size="16">Concrete next action</text>
+    <text x="62" y="336" fill="#3D6138" font-size="12" font-weight="700" letter-spacing="1.4">始终保留的项目与任务记录</text>
+    <text x="62" y="370" fill="#53704A" font-size="16">原始用户请求</text>
+    <circle cx="260" cy="364" r="2.5" fill="#8EA880"/>
+    <text x="300" y="370" fill="#53704A" font-size="16">有效约束</text>
+    <circle cx="498" cy="364" r="2.5" fill="#8EA880"/>
+    <text x="536" y="370" fill="#53704A" font-size="16">工具执行证据</text>
+    <circle cx="736" cy="364" r="2.5" fill="#8EA880"/>
+    <text x="774" y="370" fill="#53704A" font-size="16">关键决策与失败尝试</text>
+    <circle cx="974" cy="364" r="2.5" fill="#8EA880"/>
+    <text x="1012" y="370" fill="#53704A" font-size="16">明确的下一步</text>
   </g>
 </svg>

@@ -5,7 +5,7 @@ import json
 import re
 from uuid import uuid4
 
-from session import preview, read_json, safe_path, timestamp, write_json
+from .storage import preview, read_json, safe_path, timestamp, write_json
 
 NOTE_KINDS = ("constraint", "decision", "finding", "failed_attempt")
 NOTE_STATUSES = ("active", "unverified", "superseded")

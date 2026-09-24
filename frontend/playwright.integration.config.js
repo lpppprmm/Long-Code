@@ -12,7 +12,7 @@ export default defineConfig({
   use: { baseURL: 'http://127.0.0.1:5174', viewport: { width: 1440, height: 960 } },
   webServer: [
     {
-      command: 'PYTHONPATH=.. ../.venv/bin/python ../tests/rollover_server.py',
+      command: 'cd .. && .venv/bin/python -m tests.support.rollover_server',
       url: 'http://127.0.0.1:8765/api/state',
       env: { FRONTEND_ORIGINS: 'http://127.0.0.1:5174' },
     },

@@ -7,9 +7,9 @@ from threading import Event
 import uvicorn
 from anthropic.types import Message
 
-from agent import Agent
-from api import create_app
-from session import HANDOFF_SECTIONS
+from long_code.agent import Agent
+from long_code.api import create_app
+from long_code.session import HANDOFF_SECTIONS
 
 
 def response(content, stop="end_turn"):

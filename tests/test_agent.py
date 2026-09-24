@@ -13,28 +13,26 @@ from threading import Event, Thread
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from agent import Agent
-from main import Application
-from session import (
+from long_code.agent import Agent
+from long_code.application import Application
+from long_code.cli import execute_command
+from long_code.config import configured_context_limit, estimate_tokens
+from long_code.history import search_history
+from long_code.models import Session
+from long_code.projects import Registry
+from long_code.repository import inspect_project, verify_checkpoint
+from long_code.session import (
     HANDOFF_SECTIONS,
-    Registry,
-    Session,
     add_message,
-    atomic_write,
     bootstrap_session,
-    configured_context_limit,
     estimate_context,
-    estimate_tokens,
-    inspect_project,
     load_session,
     prepare_context,
-    read_json,
     rollover_session,
     save_state,
-    search_history,
-    verify_checkpoint,
 )
-from tools import (
+from long_code.storage import atomic_write, read_json
+from long_code.tools import (
     TOOLS,
     edit_file,
     execute_tool,
@@ -143,7 +141,7 @@ class ProjectTest(unittest.TestCase):
     def test_failed_registry_write_cleans_new_project_and_allows_retry(self):
         root = self.base / "new-repo"
         root.mkdir()
-        with (patch("session.write_json", side_effect=OSError("registry write failed")),
+        with (patch("long_code.projects.write_json", side_effect=OSError("registry write failed")),
               self.assertRaises(OSError)):
             self.registry.create("Retry Project", str(root))
         self.assertFalse((self.registry.home / "projects" / "retry-project").exists())
@@ -159,7 +157,7 @@ class ProjectTest(unittest.TestCase):
 
     def test_data_home_rejects_a_second_process(self):
         script = ("import sys; from pathlib import Path; "
-                  "from session import Registry; Registry(Path(sys.argv[1]))")
+                  "from long_code.projects import Registry; Registry(Path(sys.argv[1]))")
         command = [sys.executable, "-c", script, str(self.registry.home)]
         blocked = subprocess.run(command, cwd=Path(__file__).resolve().parents[1],
                                  capture_output=True, text=True, check=False)
@@ -294,7 +292,7 @@ class ProjectTest(unittest.TestCase):
                 raise OSError("disk failure")
             original(path, text)
 
-        with (patch("session.atomic_write", side_effect=fail_latest),
+        with (patch("long_code.session.atomic_write", side_effect=fail_latest),
               self.assertRaisesRegex(OSError, "disk failure")):
             rollover_session(self.project, self.session, summary)
         reopened = load_session(self.project)
@@ -342,7 +340,7 @@ class ProjectTest(unittest.TestCase):
 
     def test_atomic_write_failure_keeps_previous_json(self):
         before = self.project.state_file.read_text()
-        with (patch("session.os.replace", side_effect=OSError("disk failure")),
+        with (patch("long_code.storage.os.replace", side_effect=OSError("disk failure")),
               self.assertRaises(OSError)):
             save_state(self.project, Session(id=99))
         self.assertEqual(self.project.state_file.read_text(), before)
@@ -350,7 +348,7 @@ class ProjectTest(unittest.TestCase):
 
     def test_failed_compact_checkpoint_does_not_mutate_live_session(self):
         before = copy.deepcopy(self.session)
-        with (patch("session.save_state", side_effect=OSError("disk failure")),
+        with (patch("long_code.session.save_state", side_effect=OSError("disk failure")),
               self.assertRaises(OSError)):
             prepare_context(self.project, self.session, summary, force=True)
         self.assertEqual(self.session, before)
@@ -395,7 +393,7 @@ class ProjectTest(unittest.TestCase):
         path = self.repo / "script.sh"
         path.write_text("old")
         path.chmod(0o755)
-        with (patch("session.os.replace", side_effect=OSError("disk full")),
+        with (patch("long_code.storage.os.replace", side_effect=OSError("disk full")),
               self.assertRaises(OSError)):
             write_file(self.project, "script.sh", "new")
         self.assertEqual(path.read_text(), "old")
@@ -413,12 +411,12 @@ class ProjectTest(unittest.TestCase):
             read_file(self.project, "large.txt", limit=1001)
         history = self.project.transcripts_dir / "session_999.jsonl"
         history.write_text("needle\n" * 100)
-        with patch("session.MAX_HISTORY_SCAN_BYTES", 20):
+        with patch("long_code.history.MAX_HISTORY_SCAN_BYTES", 20):
             result = search_history(self.project, "needle")
         self.assertIn("Search stopped at the history scan limit", result)
 
     def test_bash_can_be_cancelled(self):
-        from tools import RunCancelled
+        from long_code.tools import RunCancelled
 
         cancel = Event()
         thread = Thread(target=lambda: (cancel.wait(0.15), cancel.set()))
@@ -473,7 +471,7 @@ class ProjectTest(unittest.TestCase):
             run_bash(self.project, "sleep 5", timeout=1)
 
     def test_bash_stops_oversized_output(self):
-        with (patch("tools.MAX_BASH_OUTPUT_BYTES", 1024),
+        with (patch("long_code.tools.MAX_BASH_OUTPUT_BYTES", 1024),
               self.assertRaisesRegex(RuntimeError, "output exceeded 1024 bytes")):
             run_bash(self.project, "printf '%02000d' 0")
 
@@ -665,7 +663,7 @@ class ProjectTest(unittest.TestCase):
 
     def test_interrupt_closes_all_tool_calls(self):
         client = FakeClient([response(calls=[("bash", {"command": "true"}), ("glob", {"pattern": "*"})])])
-        with (patch("agent.execute_tool", side_effect=KeyboardInterrupt),
+        with (patch("long_code.agent.execute_tool", side_effect=KeyboardInterrupt),
               self.assertRaises(KeyboardInterrupt)):
             Agent(client, "fake", emit=lambda _: None).run(self.project, self.session, "Do work")
         results = self.session.messages[-1]["content"]
@@ -674,7 +672,7 @@ class ProjectTest(unittest.TestCase):
         self.assertEqual(self.session.active_request, "Do work")
 
     def test_cancelled_bash_keeps_valid_tool_history_and_request(self):
-        from tools import RunCancelled
+        from long_code.tools import RunCancelled
 
         client = FakeClient([response(calls=[("bash", {"command": "sleep 5"}),
                                               ("glob", {"pattern": "*"})])])
@@ -698,16 +696,16 @@ class ProjectTest(unittest.TestCase):
         spaced.mkdir()
         app = Application(self.registry.home)
         with io.StringIO() as output, patch("sys.stdout", output):
-            self.assertTrue(app.command(f'new "Quoted Project" "{spaced}"'))
-            app.command("/project current")
+            self.assertTrue(execute_command(app, f'new "Quoted Project" "{spaced}"'))
+            execute_command(app, "/project current")
             self.assertIn("Quoted Project", output.getvalue())
-            app.command("/back")
+            execute_command(app, "/back")
             self.assertIsNone(app.project)
-            self.assertFalse(app.command("exit"))
+            self.assertFalse(execute_command(app, "exit"))
         app.close()
         self.registry.close()
         result = subprocess.run(
-            [os.sys.executable, str(Path(__file__).resolve().parents[1] / "main.py"),
+            [os.sys.executable, "-m", "long_code",
              "--data-home", str(self.registry.home)],
             input="list\nexit\n", capture_output=True, text=True, check=False,
             env={**os.environ, "MODEL_ID": "", "ANTHROPIC_API_KEY": ""},

@@ -4,32 +4,23 @@ import json
 import os
 from collections import deque
 from contextlib import asynccontextmanager, contextmanager
-from pathlib import Path
 from threading import Event, Lock
 from uuid import uuid4
 
-from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from agent import Agent
-from main import Application
-from session import (
-    atomic_write,
-    configured_context_limit,
-    estimate_context,
-    estimate_tokens,
-    list_sessions,
-    read_preview,
-    search_history,
-    session_history,
-    timestamp,
-)
-from task_state import task_document
-from tools import RunCancelled
+from .agent import Agent
+from .application import Application
+from .config import agent_options, estimate_tokens, load_environment
+from .history import list_sessions, search_history, session_history
+from .session import estimate_context
+from .storage import atomic_write, read_preview, timestamp
+from .task_state import task_document
+from .tools import RunCancelled
 
 MAX_EVENT_LOG_BYTES = 4 * 1024 * 1024
 COMPACT_EVENT_LOG_BYTES = MAX_EVENT_LOG_BYTES // 2
@@ -162,13 +153,10 @@ class Workspace:
 
 
 def create_app(data_home=None, agent=None):
-    load_dotenv(Path(__file__).with_name(".env"))
+    load_environment()
     workspace = Workspace(
         data_home or os.getenv("SIMPLE_AGENT_HOME", "~/.simple-agent"),
-        agent or Agent(context_limit=configured_context_limit(),
-                       output_limit=int(os.getenv("MAX_TOOL_OUTPUT", "10000")),
-                       summary_max_tokens=int(os.getenv("SUMMARY_MAX_TOKENS", "4000")),
-                       max_tokens=int(os.getenv("MAX_TOKENS", "8000"))),
+        agent or Agent(**agent_options()),
     )
 
     @asynccontextmanager

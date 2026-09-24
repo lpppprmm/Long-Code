@@ -4,6 +4,10 @@
 
 Operational details for the CLI, browser workspace, task records, and development.
 
+Run commands from the repository root. Start the CLI with `.venv/bin/python -m long_code`
+or the backend with `.venv/bin/python -m uvicorn long_code.api:app --host 127.0.0.1 --port 8000`.
+The root `.env` is shared by both entry points; existing project records need no migration.
+
 ## CLI commands
 
 | Command | Purpose |
@@ -180,8 +184,9 @@ browser tests mock API responses. The integration test starts a real FastAPI bac
 offline model on ports 8765 and 5174, then exercises compaction, two rollovers, and recovery
 in the UI. It uses an isolated 4,000-token demo budget; normal configuration is unchanged.
 
-The core modules are `main.py` (CLI), `agent.py` (model loop), `session.py` (project state
-and lifecycle), `task_state.py` (durable task records and evidence), and `tools.py` (tools).
-`api.py` provides the HTTP adapter, and `frontend/` is the browser client. The backend
-exposes project selection, state, chat and cancellation,
-history search, and session list/detail routes under `/api/`.
+The Python backend lives in `long_code/`, and `frontend/` contains the browser client.
+CLI commands and FastAPI routes share `application.py`; session recovery, task records,
+project registration, storage, and history each have a dedicated module. See the
+[architecture guide](architecture.md) for module boundaries and the current entry points.
+The backend exposes project selection, state, chat and cancellation, history search,
+and session list/detail routes under `/api/`.

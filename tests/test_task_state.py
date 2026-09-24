@@ -11,17 +11,17 @@ from unittest.mock import patch
 from anthropic.types import Message
 from fastapi.testclient import TestClient
 
-from agent import Agent
-from api import create_app
-from session import (
-    Registry,
+from long_code.agent import Agent
+from long_code.api import create_app
+from long_code.projects import Registry
+from long_code.session import (
     bootstrap_session,
     load_session,
     prepare_context,
-    read_json,
     save_state,
 )
-from task_state import (
+from long_code.storage import read_json
+from long_code.task_state import (
     load_task,
     record_request,
     source_record,
@@ -30,7 +30,7 @@ from task_state import (
     task_path,
     update_task,
 )
-from tools import RunCancelled, execute_tool, read_file, write_file
+from long_code.tools import RunCancelled, execute_tool, read_file, write_file
 
 
 def response(calls=()):
@@ -161,7 +161,7 @@ class TaskStateTest(unittest.TestCase):
         self.assertEqual(set(task["notes"]), {"public-api", "unknown"})
         self.assertEqual(task["next_action"], self.action())
         before = task_path(self.project, self.session.task_id).read_bytes()
-        with patch("session.os.replace", side_effect=OSError("disk full")), self.assertRaises(OSError):
+        with patch("long_code.storage.os.replace", side_effect=OSError("disk full")), self.assertRaises(OSError):
             update_task(self.project, self.session, next_action={**self.action(), "action": "Try a different fix."})
         self.assertEqual(task_path(self.project, self.session.task_id).read_bytes(), before)
 

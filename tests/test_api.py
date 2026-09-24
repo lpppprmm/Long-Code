@@ -10,9 +10,9 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from api import LazyApp, create_app
-from session import add_message, rollover_session, save_state
-from tools import RunCancelled
+from long_code.api import LazyApp, create_app
+from long_code.session import add_message, rollover_session, save_state
+from long_code.tools import RunCancelled
 
 
 class TestAgent:
@@ -114,8 +114,8 @@ class APITest(unittest.TestCase):
     def test_event_log_is_compacted(self):
         self.create_project()
         workspace = self.app.state.workspace
-        with (patch("api.MAX_EVENT_LOG_BYTES", 1000),
-              patch("api.COMPACT_EVENT_LOG_BYTES", 500)):
+        with (patch("long_code.api.MAX_EVENT_LOG_BYTES", 1000),
+              patch("long_code.api.COMPACT_EVENT_LOG_BYTES", 500)):
             for number in range(30):
                 workspace.record("activity", f"Event {number}: " + "x" * 100)
         path = workspace.runtime.project.data_dir / "web-events.jsonl"

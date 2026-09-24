@@ -6,8 +6,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from agent import Agent
-from session import Registry, load_session
+from long_code.agent import Agent
+from long_code.projects import Registry
+from long_code.session import load_session
 
 try:
     from anthropic import Anthropic, DefaultHttpxClient
