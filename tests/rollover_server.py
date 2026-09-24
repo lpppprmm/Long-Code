@@ -49,6 +49,7 @@ class DemoModel:
             bootstrap = kwargs["messages"][0]["content"]
             assert "DEMO_REQUIREMENT" in bootstrap and "Verify demo output" in bootstrap
             assert "Complete the offline rollover demo" in bootstrap
+            assert "demo-constraint" in bootstrap and "Inspect the generated demo artifacts" in bootstrap
         if self.turns == 5:
             return response([{"type": "text", "text": "Offline rollover demo complete. Requirements retained through Session 3."}])
         calls = []
@@ -56,6 +57,14 @@ class DemoModel:
             calls.extend([
                 ("write_file", {"path": "agent://PROJECT.md", "content": "# Project\n\nPreserve DEMO_REQUIREMENT."}),
                 ("todo_write", {"todos": [{"content": "Verify demo output", "status": "pending"}]}),
+                ("task_update", {
+                    "notes": [{"id": "demo-constraint", "kind": "constraint",
+                               "text": "Preserve DEMO_REQUIREMENT across all sessions.",
+                               "status": "active", "evidence": ["request-0001"]}],
+                    "next_action": {"action": "Inspect the generated demo artifacts.",
+                                    "verification": "Verify demo output retains the requested content.",
+                                    "files": ["artifact-4.txt"], "evidence": []},
+                }),
             ])
         # A large tool input crosses the real threshold; its content is not dumped into the UI.
         calls.append(("write_file", {"path": f"artifact-{self.turns}.txt", "content": "demo evidence\n" * 1600}))

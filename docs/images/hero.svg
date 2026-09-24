@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="420" viewBox="0 0 1280 420" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">Long Code — Keep building. Across sessions.</title>
+  <desc id="desc">A local coding agent with fresh context windows connected by durable task records, source evidence, and a clear next action.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1280" y2="420" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F8FAF6"/><stop offset="1" stop-color="#EAF1E7"/>
+    </linearGradient>
+    <pattern id="dots" width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1" fill="#B9C9B5" opacity=".5"/></pattern>
+    <filter id="shadow" x="-20%" y="-30%" width="150%" height="170%"><feDropShadow dx="0" dy="12" stdDeviation="15" flood-color="#294E38" flood-opacity=".08"/></filter>
+  </defs>
+  <rect x="1" y="1" width="1278" height="418" rx="24" fill="url(#bg)" stroke="#DCE5D8"/>
+  <path d="M690 0H1256Q1280 0 1280 24V396Q1280 420 1256 420H690Z" fill="url(#dots)"/>
+  <g font-family="Inter, 'Segoe UI', Arial, sans-serif">
+    <rect x="52" y="48" width="38" height="38" rx="11" fill="#345B46"/>
+    <path d="m63 59 7 8-7 8m12 0h6" stroke="#FFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="103" y="75" fill="#273D2F" font-size="26" font-weight="700" letter-spacing="-1">long code<tspan fill="#699265">.</tspan></text>
+    <text x="54" y="133" fill="#698064" font-size="12" font-weight="700" letter-spacing="2.5">A LOCAL CODING AGENT</text>
+    <text x="50" y="205" fill="#203E2D" font-size="64" font-weight="700" letter-spacing="-2.6">Keep building.</text>
+    <text x="50" y="279" fill="#203E2D" font-size="64" font-weight="700" letter-spacing="-2.6">Across sessions.</text>
+    <text x="54" y="325" fill="#64765F" font-size="18">Fresh context. Durable progress. Your project.</text>
+    <text x="54" y="377" fill="#5C735B" font-size="12" font-weight="600" letter-spacing="1.3">CLI + WEB</text>
+    <circle cx="155" cy="373" r="2" fill="#9CB393"/>
+    <text x="175" y="377" fill="#5C735B" font-size="12" font-weight="600" letter-spacing="1.3">LOCAL FILES</text>
+    <circle cx="289" cy="373" r="2" fill="#9CB393"/>
+    <text x="309" y="377" fill="#5C735B" font-size="12" font-weight="600" letter-spacing="1.3">RECOVERABLE TASKS</text>
+    <g filter="url(#shadow)">
+      <rect x="721" y="93" width="210" height="170" rx="17" fill="#FFF" stroke="#CFDCC9"/>
+      <path d="M721 139H931" stroke="#E9EEE6"/>
+      <circle cx="744" cy="117" r="4" fill="#B7CAB0"/>
+      <circle cx="759" cy="117" r="4" fill="#D2DFCB"/>
+      <circle cx="774" cy="117" r="4" fill="#E1E9DD"/>
+      <text x="745" y="170" fill="#819079" font-size="11" font-weight="600" letter-spacing="1.2">SESSION 01</text>
+      <text x="745" y="199" fill="#39533C" font-size="20" font-weight="600">Make progress</text>
+      <rect x="745" y="222" width="160" height="5" rx="2.5" fill="#ECF1E8"/>
+      <rect x="745" y="222" width="134" height="5" rx="2.5" fill="#AAC29D"/>
+    </g>
+    <g filter="url(#shadow)">
+      <rect x="980" y="66" width="248" height="196" rx="17" fill="#345B46"/>
+      <path d="M980 113H1228" stroke="#597A61"/>
+      <circle cx="1004" cy="90" r="4" fill="#A9C79B"/>
+      <text x="1020" y="95" fill="#D1E2C9" font-size="11" font-weight="600" letter-spacing="1.2">A FRESH WINDOW</text>
+      <text x="1004" y="145" fill="#BED3B4" font-size="11" font-weight="600" letter-spacing="1.2">SESSION 02</text>
+      <text x="1004" y="178" fill="#FFF" font-size="23" font-weight="600">Continue work</text>
+      <text x="1004" y="209" fill="#D2E0CC" font-size="14">Inspect. Verify. Continue.</text>
+      <rect x="1004" y="231" width="198" height="5" rx="2.5" fill="#517359"/>
+      <rect x="1004" y="231" width="38" height="5" rx="2.5" fill="#C0DCAB"/>
+    </g>
+    <path d="M942 180h23m-6-6 6 6-6 6" stroke="#6D8C63" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M824 264v27m281-28v28" stroke="#9BB68E" stroke-width="1.5" stroke-dasharray="4 5"/>
+    <rect x="721" y="299" width="507" height="80" rx="14" fill="#FFF" stroke="#CFDCC9"/>
+    <rect x="741" y="320" width="37" height="37" rx="10" fill="#EDF3E7"/>
+    <path d="M752 330h14m-14 7h14m-14 7h9" stroke="#608450" stroke-width="2" stroke-linecap="round"/>
+    <text x="792" y="331" fill="#365033" font-size="14" font-weight="600">TASK STATE STAYS WITH THE PROJECT</text>
+    <text x="792" y="355" fill="#75866D" font-size="13">User sources · Evidence · Next action</text>
+  </g>
+</svg>

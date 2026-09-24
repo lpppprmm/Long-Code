@@ -1,5 +1,9 @@
 # Simple Coding Agent Technical Design Document
 
+This document describes the original V1 baseline. The current implementation also
+includes a web workspace and independent task records with evidence-backed notes;
+see [README.md](README.md#projects-sessions-and-recovery) for the current recovery workflow.
+
 ## 1. Project Overview
 
 ### 1.1 Project Name

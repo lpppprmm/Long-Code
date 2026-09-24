@@ -28,6 +28,7 @@ from session import (
     session_history,
     timestamp,
 )
+from task_state import task_document
 from tools import RunCancelled
 
 MAX_EVENT_LOG_BYTES = 4 * 1024 * 1024
@@ -82,6 +83,7 @@ class Workspace:
         if project:
             for name, path in (("project", project.project_file), ("handoff", project.handoff_file)):
                 documents[name] = read_preview(path, 20_000) if path.exists() else ""
+            documents["task"] = task_document(project, session)
         # Publish a complete snapshot; readers never traverse a mutating messages list.
         self.view = {
             "project": {"id": project.id, "name": project.name, "root": str(project.root)} if project else None,

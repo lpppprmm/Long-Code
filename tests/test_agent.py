@@ -496,9 +496,9 @@ class ProjectTest(unittest.TestCase):
                               {"id": "bad", "name": "bash", "input": {"command": "true", "extra": True}})
         self.assertTrue(result["is_error"])
 
-    def test_tool_set_is_only_v1(self):
+    def test_fixed_tool_set_includes_durable_task_updates(self):
         self.assertEqual({t["name"] for t in TOOLS},
-                         {"bash", "read_file", "write_file", "edit_file", "glob", "todo_write", "search_history"})
+                         {"bash", "read_file", "write_file", "edit_file", "glob", "todo_write", "search_history", "task_update"})
 
     def test_agent_tool_roundtrip_and_completion(self):
         client = FakeClient([

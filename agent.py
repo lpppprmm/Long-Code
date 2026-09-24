@@ -16,6 +16,7 @@ from session import (
     preview,
     save_state,
 )
+from task_state import record_request, task_uri
 from tools import TOOLS, RunCancelled, execute_tool
 
 SYSTEM_PROMPT = """You are a coding agent. Inspect the project before making assumptions.
@@ -26,6 +27,15 @@ fallible working handoff. History is reference material. Work only on the curren
 project. Bash runs synchronously in its root and is not a security sandbox.
 Use read_file with agent:// paths for this project's agent data and saved outputs.
 Use write_file or edit_file with agent://PROJECT.md to update persistent requirements.
+Use task_update to preserve task constraints, decisions, findings, failed attempts,
+and a concrete next action with a verification condition. Update individual notes
+after meaningful discoveries, edits or tests, and when the user changes requirements.
+Use stable note IDs; supersede obsolete notes explicitly. Cite original request IDs
+for constraints and runtime evidence IDs returned by tools for factual claims.
+Record unsupported hypotheses as unverified. A completed command is not proof
+that a feature works. Recheck cited files and results before relying on old evidence.
+The independent task record survives session changes. Read omitted notes and
+relevant original sources when recovering; do not rely only on HANDOFF.md.
 Keep tool inputs small. Write long files one section at a time, then use focused
 edits or small append commands to extend them without overwriting saved work.
 Inspect the Git root; an ancestor repository is not a project-local repository.
@@ -203,16 +213,35 @@ class Agent:
         if not session.messages:
             bootstrap_session(project, session)
         if request:
+            new_task = not session.active_request
+            if session.active_request and not session.task_id:
+                record_request(project, session, session.active_request)
+            source = record_request(project, session, request, new_task=new_task)
             if session.active_request and request != session.active_request:
                 session.active_request += f"\n\nUser follow-up:\n{request}"
             else:
                 session.active_request = request
             save_state(project, session)
             add_message(project, session, "user", request)
+            add_message(project, session, "user", (
+                f"Runtime task record: {task_uri(session.task_id)}. "
+                f"Original user source: {source} ({task_uri(session.task_id, source + '.json')}). "
+                "Use task_update to retain effective constraints and a concrete next action. "
+                + ("This is a new task; previous task notes are archived." if new_task else
+                   "This follows up the unfinished task; reconcile changed requirements with existing notes.")
+            ))
         elif not session.active_request:
             raise ValueError("No unfinished request to continue")
-        elif session.messages[-1]["role"] == "assistant":
-            add_message(project, session, "user", "Continue the active request; verify existing work first.")
+        else:
+            if not session.task_id:
+                source = record_request(project, session, session.active_request)
+                save_state(project, session)
+                add_message(project, session, "user", (
+                    f"Recovered request source: {source}. Task record: {task_uri(session.task_id)}. "
+                    "Use task_update to preserve progress and establish the next action."
+                ))
+            if session.messages[-1]["role"] == "assistant":
+                add_message(project, session, "user", "Continue the active request; verify existing work first.")
         recovery_count = 0
         continuations = 0
         tool_input_failures = 0

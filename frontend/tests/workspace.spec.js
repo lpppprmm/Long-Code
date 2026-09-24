@@ -14,7 +14,8 @@ async function mockWorkspace(page) {
     state = {
       ...state, project, events: events[project.id] || [], busy: false,
       session: { id: 1, compact_count: 0, context_size: 3000, context_limit: 400000, context_tokens: 750, context_limit_tokens: 100000, active_request: '', todos: [] },
-      documents: { project: `# ${project.name}\n\nKeep changes focused.`, handoff: '' },
+      documents: { project: `# ${project.name}\n\nKeep changes focused.`, handoff: '',
+        task: 'Preserve the public API.\n\nNext action: verify the parser regression test.' },
     };
   };
   await page.route('**/api/**', async route => {
@@ -135,6 +136,11 @@ test('project documents, history, failed requests, and continuation', async ({ p
   await createProject(page);
   await page.getByRole('button', { name: /项目概述/ }).click();
   await expect(page.locator('#document-content')).toContainText('Keep changes focused.');
+  await page.locator('#document-dialog').getByRole('button', { name: '关闭对话框' }).click();
+  await page.getByRole('button', { name: /任务记录/ }).click();
+  await expect(page.locator('#document-title')).toHaveText('任务记录');
+  await expect(page.locator('#document-content')).toContainText('Preserve the public API.');
+  await expect(page.locator('#document-content')).toContainText('verify the parser regression test');
   await page.locator('#document-dialog').getByRole('button', { name: '关闭对话框' }).click();
   await page.getByRole('button', { name: /搜索历史/ }).click();
   await page.getByRole('textbox', { name: '搜索关键词' }).fill('SDK');

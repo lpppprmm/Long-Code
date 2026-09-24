@@ -1,4 +1,4 @@
-"""The seven synchronous tools available to the coding agent."""
+"""Synchronous project tools and incremental durable task updates."""
 
 import json
 import os
@@ -10,6 +10,7 @@ from time import monotonic
 from uuid import uuid4
 
 from session import MAX_TOOL_OUTPUT, atomic_write, safe_path, save_state, search_history
+from task_state import NOTE_KINDS, NOTE_STATUSES, record_evidence, task_uri, update_task
 
 MAX_BASH_OUTPUT_BYTES = 10 * 1024 * 1024
 MAX_READ_LINES = 1000
@@ -48,10 +49,30 @@ TOOLS = [
              "required": ["content", "status"], "additionalProperties": False}}}, ["todos"]),
     tool("search_history", "Search only this project's historical handoffs and transcripts.",
          {"query": STRING, "limit": {"type": "integer", "minimum": 1, "maximum": 20}}, ["query"]),
+    tool("task_update", "Incrementally preserve task notes across compaction and rollover. "
+         "Upsert notes by stable ID; omitted notes and next_action remain unchanged. "
+         "Cite request/evidence IDs from this task. Constraints need a user request source. "
+         "Active means still relevant, not proven; use unverified for hypotheses, superseded for obsolete notes. "
+         "Record a specific next action and its verification condition after meaningful progress.", {
+             "notes": {"type": "array", "minItems": 1, "maxItems": 10, "items": {
+                 "type": "object", "additionalProperties": False, "properties": {
+                     "id": {"type": "string", "maxLength": 64},
+                     "kind": {"type": "string", "enum": list(NOTE_KINDS)},
+                     "text": {"type": "string", "maxLength": 600},
+                     "status": {"type": "string", "enum": list(NOTE_STATUSES)},
+                     "evidence": {"type": "array", "items": STRING, "maxItems": 5},
+                 }, "required": ["id", "kind", "text", "status", "evidence"]}},
+             "next_action": {"type": "object", "additionalProperties": False, "properties": {
+                 "action": {"type": "string", "maxLength": 600},
+                 "verification": {"type": "string", "maxLength": 600},
+                 "files": {"type": "array", "items": STRING, "maxItems": 5},
+                 "evidence": {"type": "array", "items": STRING, "maxItems": 5},
+             }, "required": ["action", "verification", "files", "evidence"]},
+         }, []),
 ]
 
 
-def run_bash(project, command: str, timeout: float = 120, cancel_event=None):
+def run_bash(project, command: str, timeout: float = 120, cancel_event=None, *, metadata=None):
     if not isinstance(command, str) or not command.strip() or not 1 <= timeout <= 600:
         raise ValueError("Use a nonempty command and a timeout from 1 to 600 seconds")
     process = subprocess.Popen(
@@ -104,9 +125,12 @@ def run_bash(project, command: str, timeout: float = 120, cancel_event=None):
                 pass
             process.wait()
             process.stdout.close()
+            if metadata is not None:
+                metadata.update(exit_code=process.returncode, timed_out=timed_out,
+                                output_truncated=too_large, cancelled=cancelled)
     text = output.decode("utf-8", errors="replace") or "(no output)"
     if cancelled:
-        raise RunCancelled("Run cancelled; unfinished request retained")
+        raise RunCancelled(f"Run cancelled; unfinished request retained\n{text}")
     if timed_out:
         raise RuntimeError(f"Command timed out after {timeout}s\n{text}")
     if too_large:
@@ -213,22 +237,35 @@ def persist_output(project, output: str, limit=MAX_TOOL_OUTPUT):
 
 
 def execute_tool(project, session, block, output_limit=MAX_TOOL_OUTPUT, cancel_event=None):
+    metadata = {}
     handlers = {
-        "bash": lambda **args: run_bash(project, cancel_event=cancel_event, **args),
+        "bash": lambda **args: run_bash(project, cancel_event=cancel_event, metadata=metadata, **args),
         "read_file": lambda **args: read_file(project, **args),
         "write_file": lambda **args: write_file(project, **args),
         "edit_file": lambda **args: edit_file(project, **args),
         "glob": lambda **args: glob(project, **args),
         "todo_write": lambda **args: todo_write(project, session, **args),
         "search_history": lambda **args: search_history(project, **args),
+        "task_update": lambda **args: update_task(project, session, **args),
     }
     result = {"type": "tool_result", "tool_use_id": block["id"]}
     try:
         if block["name"] not in handlers:
             raise ValueError(f"Unknown tool: {block['name']}")
         output = handlers[block["name"]](**block["input"])
+    except RunCancelled as exc:
+        record_evidence(project, session, block, persist_output(project, str(exc), output_limit),
+                        "interrupted", metadata)
+        raise
     except (OSError, ValueError, TypeError, RuntimeError) as exc:
         output = f"Error: {exc}"
         result["is_error"] = True
     result["content"] = persist_output(project, output, output_limit)
+    if session.task_id and block["name"] in ("bash", "read_file", "write_file", "edit_file", "glob", "search_history"):
+        source = record_evidence(project, session, block, result["content"],
+                                 "failed" if result.get("is_error") else "completed", metadata)
+        marker = f"\nEvidence: {source} ({task_uri(session.task_id, source + '.json')})"
+        # The evidence file retains this preview and any link to the complete output.
+        room = max(0, output_limit - len(marker))
+        result["content"] = result["content"][:room] + marker
     return result

@@ -452,10 +452,11 @@ document.querySelectorAll("[data-document]").forEach((button) =>
   button.addEventListener("click", () => {
     const name = button.dataset.document;
     $("#document-title").textContent =
-      name === "project" ? "项目概述" : "会话交接";
+      { project: "项目概述", task: "任务记录", handoff: "会话交接" }[name];
     $("#document-content").innerHTML = markdown(
       state.documents?.[name] ||
-        "暂无交接记录。切换到下一次会话时，助手会自动生成记录。",
+        (name === "task" ? "暂无任务记录。开始任务后，助手会持续记录约束、证据与下一步。"
+          : "暂无交接记录。切换到下一次会话时，助手会自动生成记录。"),
     );
     $("#document-dialog").showModal();
   }),

@@ -40,6 +40,11 @@ test('real API recovers a truncated summary and rolls over twice', async ({ page
   await expect(page.locator('#document-content')).toContainText('DEMO_REQUIREMENT');
   await expect(page.locator('#document-content')).toContainText('Verify demo output');
   await page.locator('#document-dialog').getByRole('button', { name: '关闭对话框' }).click();
+  await page.getByRole('button', { name: /任务记录/ }).click();
+  await expect(page.locator('#document-content')).toContainText('Preserve DEMO_REQUIREMENT across all sessions.');
+  await expect(page.locator('#document-content')).toContainText('Inspect the generated demo artifacts.');
+  await expect(page.locator('#document-content')).toContainText('request-0001');
+  await page.locator('#document-dialog').getByRole('button', { name: '关闭对话框' }).click();
   await page.screenshot({ path: '/tmp/long-code-rollover-desktop.png', fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
@@ -59,6 +64,16 @@ test('real API recovers a truncated summary and rolls over twice', async ({ page
   const checkpoint = JSON.parse(await readFile(join(data, 'state.json'), 'utf8'));
   expect(checkpoint.current_session).toBe(3);
   expect(checkpoint.active_request).toBe('');
+  const taskDirectory = join(data, 'tasks', checkpoint.task_id);
+  const task = JSON.parse(await readFile(join(taskDirectory, 'task.json'), 'utf8'));
+  expect(task.notes['demo-constraint'].evidence).toEqual(['request-0001']);
+  const source = JSON.parse(await readFile(join(taskDirectory, 'request-0001.json'), 'utf8'));
+  expect(source.text).toBe('Complete the offline rollover demo. Preserve DEMO_REQUIREMENT.');
+  for (const id of ['001', '002']) {
+    const archived = JSON.parse(await readFile(join(data, 'checkpoints', `session_${id}.json`), 'utf8'));
+    expect(archived.task.id).toBe(task.id);
+    expect(archived.task.notes['demo-constraint']).toEqual(task.notes['demo-constraint']);
+  }
   const saved = (await readFile(join(data, 'web-events.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
   expect(saved).toEqual(state.events);
   expect(errors).toEqual([]);
